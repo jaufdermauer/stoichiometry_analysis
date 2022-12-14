@@ -1,0 +1,685 @@
+from skimage import io, draw, img_as_float
+from skimage.color import rgb2gray
+from skimage.morphology import reconstruction
+from skimage.feature import blob_dog
+from skimage import io
+from os.path import basename
+from scipy import signal, linalg
+from scipy.stats import gaussian_kde, binom
+from scipy.optimize import curve_fit, minimize
+from scipy.special import erfinv
+from scipy.interpolate import interp1d
+import numpy as np
+import glob, ast
+import math
+import matplotlib
+from matplotlib import pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+from matplotlib import cm
+matplotlib.use('WXAgg')
+from matplotlib.backends.backend_wxagg import FigureCanvasWxAgg as FigureCanvas
+from matplotlib.backends.backend_wx import NavigationToolbar2Wx
+from matplotlib.figure import Figure
+from matplotlib import pyplot as plt
+from matplotlib import cm
+from os.path import basename, relpath, realpath
+from readlif.reader import LifFile
+from PIL import Image,ImageEnhance
+import tifffile
+import os
+
+import fitting
+
+
+import signal_processing
+
+class StchAnalysis:
+    def __init__(self, folder_path, settings_gui_values,
+                                    detection_gui_values,
+                                    particle_gui_values):
+        self.replicates = []
+        self.folder_path = folder_path
+        videos_names = sorted([basename(x) for x in glob.glob(folder_path+"/*.tif")])
+        for img_name in videos_names:
+            self.replicates.append(StchSequence(self,
+                                                img_name,
+                                                detection_gui_values,
+                                                particle_gui_values))
+        self.names = [basename(i) for i in videos_names]
+
+        self.gui_values = settings_gui_values.copy()
+        self.local_bckg_width = 2
+
+    def get_replicate_by_name(self, name, load_video=True):
+        idx = self.names.index(name)
+        return self.get_replicate_by_index(idx, load_video)
+
+    def get_replicate_by_index(self, idx, load_video=True):
+        if load_video:
+            self.replicates[idx].load_video()
+        return self.replicates[idx]
+
+    def photobleaching_analysis(self, method):
+        """
+        Performs a photobleaching analysis
+        self.pb_count:  A dictionary of the counting by species
+                        Ex: {1: 5, 2: 3, 4: 1}
+        self.pb_steps_height: A dictionary with the step heights:
+                              Ex: { (1, 1): [100, 122, 113],    # step heights of monomers
+                                    (2, 1): [117, 102],         # step heights of dimers last step
+                                    (2, 2): [106, 111],         # step heights of dimers second step (backwards order)
+                                  }
+        """
+        self.pb_count = {}
+        self.pb_steps_count = {}
+        for replicate in self.replicates:
+            if not replicate.summary['calibration'] and replicate.summary['pb_analysis']:
+                for particle in replicate.particles:
+                    count = particle.signals[method].steps_count
+                    self.pb_count[count] = self.pb_count.setdefault(count, 0) + 1
+                    for i, height in enumerate(reversed(particle.signals[method].step_heights)):
+                        self.pb_steps_count.setdefault((count, i+1), [])
+                        self.pb_steps_count[(count, i+1)].append(height)
+
+    def get_frame0_intensities(self, brightness_method, background_method, monomers=False):
+        """
+        :return:
+         Intensities values in the first frame of detected particles
+         if monomers is True only for monomers in calibration replicates
+         if monomers is False for all particles in no calibration files
+        """
+        monomers_values = []
+        for replicate in self.replicates:
+            if (monomers and replicate.summary['calibration']) or (not monomers and not replicate.summary['calibration']):
+                for particle in replicate.particles:
+                    if (monomers and particle.signals[brightness_method].steps_count == 1) or not monomers:
+                        monomers_values.append(particle.signals[brightness_method].get_frame0_calibrated_brightness(background_method))
+        return np.array(monomers_values)
+
+    def get_frame0_values(self, brightness_method, background_method, monomers=False):
+        """
+        :param brightness_method:
+        :param background_method:
+        :return: intensities, widths, accuracies
+        """
+        brightness = []
+        widths = []
+        accuracies = []
+        for replicate in self.replicates:
+            if replicate.summary['ba_analysis'] and \
+                    ((monomers and replicate.summary['calibration']) or
+                         (not monomers and not replicate.summary['calibration'])):
+                for particle in replicate.particles:
+                    if (monomers and particle.signals[brightness_method].steps_count == 1) or not monomers:
+                        brightness.append(particle.signals[brightness_method].get_frame0_calibrated_brightness(background_method))
+                        if particle.localization != {}:
+                            widths.append(particle.localization['d'])
+                            if background_method == 'local':
+                                accuracies.append(particle.localization['accuracy_local'])
+                            elif background_method == 'global':
+                                accuracies.append(particle.localization['accuracy_global'])
+        return np.array(brightness), widths, accuracies
+
+    def brightness_analysis(self, brightness_method, background_method, fitting_method, label_efficiency):
+        """
+        Performs a brightness analysis
+        Results are stored in instance variables
+        :return:
+        """
+        mono_brightnesses, mono_widths, mono_accuracies = self.get_frame0_values(brightness_method, background_method, True)
+        self.ba_monomers_intensities = mono_brightnesses*self.gui_values['photon_coef']
+        all_brighnesses, all_widths, all_accuracies = self.get_frame0_values(brightness_method, background_method)
+        self.ba_all_intensities = all_brighnesses*self.gui_values['photon_coef']
+        if self.ba_monomers_intensities.any() and self.ba_all_intensities.any():
+            self.accuracy_avg = np.mean(all_accuracies)
+            if fitting_method == 'gaussfit':
+                self.mono_model = fitting.get_gaussian_model(self.ba_monomers_intensities)
+                self.ba_monomer_intensity = self.mono_model['mean']
+                self.all_models = fitting.get_gaussian_models(self.mono_model)
+                self.ba_all_intensities_ys, bin_edges = np.histogram(self.ba_all_intensities,
+                                                 bins=fitting.get_bins_number(self.ba_all_intensities),
+                                                 normed=True)
+                self.ba_all_intensities_xs = [np.average(bin_edges[i:i+2]) for i, edge in enumerate(bin_edges) if i < len(bin_edges)-1]
+            else:
+                self.mono_model = get_pdf_model(self.ba_monomers_intensities)
+                self.ba_monomer_intensity = self.mono_model['mean']
+                self.all_models = get_pdf_models(self.mono_model)
+                self.ba_all_intensities_xs, self.ba_all_intensities_ys = fitting.get_kde_values(self.ba_all_intensities,
+                                                                                        num_peaks=len(self.all_models))
+
+            self.multiple_fitting_res = get_multiple_fitting(self.ba_all_intensities_xs,
+                                                             self.ba_all_intensities_ys,
+                                                             self.all_models, label_efficiency)
+            self.ba_distribution = []
+            self.ba_distribution_errs = []
+            vals_total = np.sum(self.multiple_fitting_res['params'])
+            for i, (val, err) in enumerate(zip(self.multiple_fitting_res['params'], self.multiple_fitting_res['sderrors'])):
+                factor = 100.0/vals_total
+                self.ba_distribution.append(factor*val)
+                # Todo: error is too big for PDF
+                self.ba_distribution_errs.append(err)
+            return True
+        return False
+
+    def export_brightness(self):
+
+        str = "Particles: {}\n".format(len(self.ba_all_intensities))
+        str += "Monomers: {}\n".format(len(self.ba_monomers_intensities))
+
+        str += "\nModels values \nMean\tStandard Deviation\tArea\tStandard Error\n"
+        if self.multiple_fitting_res:
+            for i, model in enumerate(self.all_models):
+                str += "{:.4f}\t{:.4f}\t{:.4f}\t{:.4f}\n".format(model['mean'],
+                                                                 model['sdev'],
+                                                                 self.multiple_fitting_res['params'][i],
+                                                                 self.multiple_fitting_res['sderrors'][i])
+
+
+        # Accuracy
+        str += "\nAccuracy: {}\n".format(self.accuracy_avg)
+
+        # Corrected distribution
+        str +="\nCorrected distribution\n"
+        for x in self.ba_distribution:
+            str += "{:.2f}\n".format(x)
+        str +="\n"
+
+        # Monomers intensities
+        str += "\nMonomers intensities \n"
+        for v in self.ba_monomers_intensities:
+            str += "{:.4f}\n".format(v)
+
+        # First frames intensities
+        str += "\nFirst frame intensities \n"
+        for v in self.ba_all_intensities:
+            str += "{:.4f}\n".format(v)
+
+        # All intensities histogram values
+        str += "\nHistogram values\n"
+        str += "xs\tys\n"
+        for x, y in zip(self.ba_all_intensities_xs, self.ba_all_intensities_ys):
+            str += "{}\t{}\n".format(x, y)
+
+        return str
+
+    def export_brightness_1(self):
+        
+        str = "Particles: {}\n".format(len(self.ba_all_intensities))
+        
+        # First frames intensities
+        str += "\nFirst frame intensities \n"
+        for v in self.ba_all_intensities:
+            str += "{:.4f}\n".format(v)
+
+        return str
+
+    def export_brightness_2(self):
+        
+        str = "Particles: {}\n".format(len(self.ba_all_intensities))
+        
+        # Monomers intensities
+        str += "\nMonomers intensities \n"
+        for v in self.ba_monomers_intensities:
+            str += "{:.4f}\n".format(v)
+
+        return str
+
+    def export_brightness_3(self):
+        
+        str = "Particles: {}\n".format(len(self.ba_all_intensities))
+        
+        # First frames intensities
+        str += "\nFirst frame intensities \n"
+        for v in self.ba_all_intensities:
+            str += "{:.4f},".format(v)
+
+        return str
+
+    def export_photobleaching(self):
+        str = "Species\tCount\n"
+        keys = sorted(self.pb_count.keys())
+        for key in keys:
+            str += "{}\t{}\n".format(key, self.pb_count[key])
+
+        str += "\nStep heights \n"
+
+        collapsed_heights = {} #
+        for (specie, step), step_height in self.pb_steps_count.iteritems():
+            if 1 <= specie <= 6:
+                collapsed_heights.setdefault(specie, [])
+                collapsed_heights[specie].extend(step_height)
+        keys = sorted(collapsed_heights.keys())
+        for k in keys:
+            str += "{}\n".format(k)
+            for v in collapsed_heights[k]:
+                str += "{:.2f}\n".format(v)
+            str += "\n"
+
+        return str
+
+
+class StchSequence:
+    def __init__(self, parent, video_name, detection_gui_values, particle_gui_values):
+        self.parent = parent
+        self.video_name = video_name
+        self.video = None
+        self.particles = []
+        self.bckg_rois = []
+        self.gui_values = detection_gui_values.copy()
+        self.particle_gui_values = particle_gui_values
+        keys = ['global_bckg_avg', 'global_bckg_std', 'local_bckg_avg',
+                'accuracy_local', 'accuracy_global',
+                'fitted_width_avg', 'fitted_width_std']
+        self.summary = {}
+        for k in keys:
+            self.summary[k] = 0
+        self.summary['calibration'] = False
+        self.summary['pb_analysis'] = True # Include in the photobleaching analysis
+        self.summary['ba_analysis'] = True # Include in the brightness analysis
+
+    def load_video(self):
+        self.video = io.MultiImage(self.parent.folder_path +'/' + self.video_name)[0]
+
+    def add_particle(self, x, y, r):
+        """
+        Adds a new particle, if not overlaps with other particle
+        :returns Particle index if added, None otherwise
+        """
+        if self.is_close_to_edge(x, y, r): # Not to close to the edges
+            return None
+        particle_id = self.get_particle_from_coordinates(x, y)
+        if particle_id is None: # Not in a particle region
+            p = Particle(x, y, r, self, self.particle_gui_values.copy())
+            for signal in p.signals.values():
+                signal.generate_frame0_values()
+            self.particles.append(p)
+            return len(self.particles)-1
+        return None
+
+    def is_close_to_edge(self, x, y, r):
+        """
+        Returns wether if (x, y) is closer than r to the edges
+        :param x:
+        :param y:
+        :param r:
+        :return:
+        """
+        xlim = len(self.video[0])
+        ylim = len(self.video[0][0])
+        if x-0 < r or y-0 < r or xlim-x < r or ylim-y < r:
+            return True
+        return False
+
+    def get_image_with_detected_rois(self, frame, part_idxs=None):
+        """
+        Return an image with the detected particles circled
+        :param frame:
+        :return:
+        """
+        image = np.copy(self.video[frame])
+        color = np.max(image)
+        indexes = part_idxs if part_idxs is not None else range(len(self.particles))
+
+        for i in indexes:
+            try:
+                rr, cc = draw.circle_perimeter(self.particles[i].x,
+                                               self.particles[i].y,
+                                               self.particles[i].r)
+                image[rr, cc] = color
+            except IndexError:
+                pass
+
+        for bckg in self.bckg_rois:
+            image[draw.line(bckg.r1, bckg.c1, bckg.r1, bckg.c2)] = color
+            image[draw.line(bckg.r1, bckg.c2, bckg.r2, bckg.c2)] = color
+            image[draw.line(bckg.r2, bckg.c1, bckg.r1, bckg.c1)] = color
+            image[draw.line(bckg.r2, bckg.c1, bckg.r2, bckg.c2)] = color
+
+        return image
+
+    def get_particle_from_coordinates(self, x, y):
+        """
+        Return the particle that encloses the (x, y) point within the radio
+        :return:
+        particle index
+        """
+        for i, p in enumerate(self.particles):
+            try:
+                if np.power(p.x - x, 2) + np.power(p.y - y, 2) <= np.power(p.r, 2):
+                    return i
+            except:
+                pass
+        return None
+
+    def detect_particles(self, frame):
+        """
+        Detect particles (blobs) in a frame using Difference of Gaussians
+        :param frame:
+        :param min_sigma:
+        :param max_sigma:
+        :param threshold:
+        :return:
+        """
+        image_gray = rgb2gray(img_as_float(self.video[frame]))
+
+        seed = np.copy(image_gray)
+        seed[0:-1, 0:-1] = image_gray.min()
+        mask = image_gray
+
+        dilated = reconstruction(seed, mask, method='dilation')
+        image_gray = image_gray - dilated
+
+        blobs_dog = blob_dog(image_gray, min_sigma=self.gui_values['min_sigma'],
+                             max_sigma=self.gui_values['max_sigma'],
+                             threshold=self.gui_values['threshold'])
+        if blobs_dog.any():
+            blobs_dog[:, 2] = blobs_dog[:, 2] * np.sqrt(2)
+
+            for (x, y, r) in blobs_dog:
+                self.add_particle(int(x), int(y), self.parent.gui_values['def_roi_radius'])
+        return len(self.particles)
+
+    def generate_background(self, frame, width):
+        if self.video is None:
+            self.load_video()
+        image = np.copy(self.video[frame])
+        bgmatrix = BGMatrix(image, width)
+        self.bckg_rois = bgmatrix.get_min_squares()
+        self.update_global_background(frame)
+
+    def add_bckg_roi_from_coords(self, r1, r2, c1, c2):
+        self.bckg_rois.append(BGMatrixQuadrant(r1, r2, c1, c2))
+
+    def add_bckg_roi_from_width(self, x, y, w):
+        if self.is_close_to_edge(x+w/2, y+w/2, w/2):
+            return None
+        self.add_bckg_roi_from_coords(x, x+w, y, y+w)
+        return True
+
+    def get_background_from_coordinates(self, x, y):
+        for i, bckg_roi in enumerate(self.bckg_rois):
+            if bckg_roi.r1 < x < bckg_roi.r2 and bckg_roi.c1 < y < bckg_roi.c2:
+                return i
+        return None
+
+    def update_global_background(self, frame):
+        sum = 0
+        count = 0
+        values = []
+        img = self.video[frame]
+        for bckg_roi in self.bckg_rois:
+            sum += bckg_roi.sum(img)
+            values = np.concatenate([values, bckg_roi.values(img)])
+            count += bckg_roi.count(img)
+        try:
+            self.summary['global_bckg_avg'] = sum / float(count)
+            self.summary['global_bckg_std'] = np.std(values)
+            for p in self.particles:
+                p.update_global_accuracy()
+                #Todo: what todo when remove all rois
+        except ZeroDivisionError:
+            self.summary['global_bckg_avg'] = 0
+            self.summary['global_bckg_std'] = 0
+
+    def update_summary_values(self, method):
+        local_bckgs = []
+        local_accrs = []
+        global_accrs = []
+        fitted_widths = []
+        for p in self.particles:
+            local_bckgs.append(p.signals[method].frame0_local_bckg_avg)
+            if p.localization != {}:
+                local_accrs.append(p.localization['accuracy_local'])
+                global_accrs.append(p.localization['accuracy_global'])
+                fitted_widths.append(p.localization['d'])
+        if self.particles != []:
+            self.summary['local_bckg_avg'] = np.mean(local_bckgs)
+            if p.localization != {}:
+                self.summary['accuracy_global'] = np.mean(global_accrs)
+                self.summary['accuracy_local'] = np.mean(local_accrs)
+                self.summary['fitted_width_avg'] = np.mean(fitted_widths)
+                self.summary['fitted_width_std'] = np.std(fitted_widths)
+
+    def localize_particles(self, frame, fit_method):
+        """
+
+        :param frame:
+        :return:
+        """
+        particles_to_remove = []
+        for i, p in enumerate(self.particles):
+            try:
+                res = p.localize(frame, fit_method)
+                if not res:
+                    particles_to_remove.append(i) # Remove particles where localization did not converged
+            except IndexError:
+                # Removing particles if the outer ring goes beyond image boundaries
+                particles_to_remove.append(i)
+
+        for i in reversed(particles_to_remove):
+            self.particles.pop(i)
+
+    def discard_close_particles(self):
+        """
+        Remove particles that are not suitable because too close to each other,
+        too close to the border, the width is too wide
+        :return:
+        """
+        # Removing particles too close each other
+        # This is assuming that they are ordered by x value after detecting
+        # Todo: order the list by myself
+        # Assuming all particles have the same radius
+        remove_idxs = set()
+        max_dist = 2*self.parent.gui_values['def_roi_radius'] + self.parent.local_bckg_width
+        for i, p in enumerate(self.particles):
+            j = 1
+            while i+j < len(self.particles)-1 and p.x-self.particles[i+j].x < max_dist:
+                if p.is_too_close(self.particles[i+j], max_dist):
+                    remove_idxs.add(i)
+                    remove_idxs.add(i+j)
+                j += 1
+        self.discard_particles(remove_idxs)
+
+        # Removing in the borders
+        remove_idxs = []
+        for i, p in enumerate(self.particles):
+            if self.is_close_to_edge(p.x, p.y, p.r + self.parent.local_bckg_width):
+                remove_idxs.append(i)
+        self.discard_particles(remove_idxs)
+
+    def discard_wide_particles(self, threshold):
+        idxs = self.get_outliers_indexes(threshold)
+        self.discard_particles(idxs)
+
+    def discard_particles(self, indexes):
+        for i in reversed(sorted(list(indexes))):
+            self.particles.pop(i)
+
+    def get_outliers_indexes(self, threshold):
+        widths = []
+        for p in self.particles:
+            if p.localization != {}:
+                widths.append(p.localization['d'])
+
+        coef = erfinv(threshold)
+        w_mean = fitting.get_peak_by_kde(np.array(widths))[0]
+        # Todo: Handle bad cases
+        w_std = np.std(widths)
+        idxs = []
+        for i, p in enumerate(self.particles):
+            if p.localization != {} and p.localization['d'] > w_mean + coef*w_std:
+                idxs.append(i)
+        return idxs
+
+
+class Particle:
+    def __init__(self, x, y, r, parent, gui_values):
+        self.x = x
+        self.y = y
+        self.r = r
+        self.gui_values = gui_values.copy()
+        self.parent = parent
+        self.signals = {'sum': signal_processing.SumSignal(self),
+                        '2dgheight': signal_processing.GSignal(self),
+                        '2dgintegral': signal_processing.GSignal(self)}
+        self.localization = {}
+
+    def localize(self, frame, fit_method):
+        """
+        Relocalize the center of the particle by fitting to a 2D gaussian.
+        For the particle are computed recomputed the signals, because of the relocalization of the center.
+        It is also computed the global and local accuracy.
+        :param frame:
+        :return: True if converged, False otherwise
+        """
+        roi = rgb2gray(self.parent.video[frame][self.x-self.r:self.x+self.r+1,
+                                                self.y-self.r:self.y+self.r+1])
+        X, Y = np.meshgrid(np.arange(self.x-self.r, self.x+self.r+1),
+                           np.arange(self.y-self.r, self.y+self.r+1),
+                           indexing='ij')
+        flat_X = X.flatten()
+        flat_Y = Y.flatten()
+        flat_roi = roi.flatten()
+
+        Xout, Yout = fitting.get_outer_grid(self.x, self.y, self.r, 2)
+
+        b = np.sqrt(np.mean(self.parent.video[frame][Xout, Yout]))
+        b_std = np.std(self.parent.video[frame][Xout, Yout])
+        N = abs(np.sum(flat_roi) - len(flat_roi)*np.mean(self.parent.video[frame][Xout, Yout]))
+        a = self.parent.parent.gui_values['pixel_size']
+        init_values = [self.x, self.y, a*self.r]
+
+        if fit_method == 'MLE':
+            def mle_function(v):
+                xc, yc, sig = v
+                res=0
+                for i, j, n in zip (flat_X, flat_Y, flat_roi):
+                    E = fitting.brightness_function(i, j, xc, yc, sig, N, a, b)
+                    sum = -( -E + n*math.log(E) - math.log(math.factorial(n)))
+                    res += sum
+                return float(res)
+            sol = minimize(mle_function, init_values, method='Nelder-Mead')
+            opt_xc, opt_yc, opt_d = sol.x
+        elif fit_method == 'LS':
+            def ls_function(xy, xc, yc, d):
+                return fitting.brightness_function(xy[0], xy[1], xc, yc, d, N, a, b)
+            try:
+                xy = [flat_X, flat_Y]
+                try:
+                    popt, pcov = curve_fit(ls_function,
+                                        xy,
+                                        flat_roi,
+                                        p0=init_values,
+                                        bounds=[[self.x-self.r, self.y-self.r, 0],
+                                                [self.x+self.r, self.y+self.r, a*self.r**2]])
+                except ValueError:
+                    return False
+            except RuntimeError:
+                return False
+            opt_xc, opt_yc, opt_d = popt
+        else:
+            return False
+
+        self.localization = {'N': N,
+                             'b': b,
+                             'd': opt_d,
+                             'xc': opt_xc,
+                             'yc': opt_yc,
+                             'accuracy_global': fitting.get_accuracy(N, opt_d, a, self.parent.summary['global_bckg_std']),
+                             'accuracy_local': fitting.get_accuracy(N, opt_d, a, b_std)}
+
+        # Relocating the center, recreating the signals
+        # and creating the respective initial values
+        self.x = int(round(opt_xc))
+        self.y = int(round(opt_yc))
+        self.signals = {'sum': signal_processing.SumSignal(self),
+                        '2dgheight': signal_processing.GSignal(self),
+                        '2dgintegral': signal_processing.GSignal(self)}
+        for signal in self.signals.values():
+            signal.generate_frame0_values()
+
+        return True
+
+    def get_fitted(self, frame):
+        if self.localization == {}:
+            return None
+
+        roi = rgb2gray(self.parent.video[frame][self.x-self.r:self.x+self.r+1,
+                                                self.y-self.r:self.y+self.r+1])
+        X, Y = np.meshgrid(np.arange(self.x-self.r, self.x+self.r+1),
+                           np.arange(self.y-self.r, self.y+self.r+1),
+                           indexing='ij')
+
+        return fitting.brightness_function(X, Y,
+                                   self.localization['xc'],
+                                   self.localization['yc'],
+                                   self.localization['d'],
+                                   self.localization['N'],
+                                   self.parent.parent.gui_values['pixel_size'],
+                                   self.localization['b'])
+
+    def update_global_accuracy(self):
+        """
+        Update computation of the accuracy using the standard deviation of the background
+        for the image. This is necessary if background ROIs are added or deleted
+        :return:
+        """
+        if self.localization != {}:
+            self.localization['accuracy_global'] = fitting.get_accuracy(self.localization['N'],
+                                                self.localization['d'],
+                                                self.parent.parent.gui_values['pixel_size'],
+                                                self.parent.summary['global_bckg_std'])
+
+    def is_too_close(self, p, limit):
+        dist = np.sqrt((self.x - p.x)**2 + (self.y - p.y)**2)
+        return dist < limit
+
+
+def get_images_from_lif(file, series):
+    img_0 = file.get_image(series)
+    images = []
+    nz = 0
+    for i in img_0.get_iter_z(t=0, c=1):
+        nz += 1
+        images.append(np.array(i))
+    return images, nz
+
+def max_int_proj(images):
+    IM_MAX= np.max(images, axis=0)
+    images.insert(0,IM_MAX)
+    return images
+
+def write_tif(images, name, *dims):
+    t = 1
+    z = dims[1]
+    c = 1
+    x = images[0].shape[1]
+    y = images[0].shape[0]
+    s = dims[0]
+    npimages = np.array(np.reshape(np.array(images).flatten(), (t,z,c,y,x)), dtype = np.int16)
+
+    tifffile.imwrite(
+            name,
+            npimages,
+            imagej=True,
+            resolution=(1, 1),
+            photometric='minisblack',
+            metadata={'axes': 'TZCYX'})
+
+def process_folder(path, checked):
+    for img_file in os.listdir(path):
+        outpath = path
+        if img_file.endswith('lif'):
+            file = LifFile(path + img_file)
+            ns = 0
+            print(checked)
+            if checked:
+                os.mkdir(path + img_file[0:len(img_file)-4])
+                outpath += img_file[0:len(img_file)-4]
+                outpath += "\\"
+            for i,s in enumerate(file.get_iter_image()):
+                ns += 1
+                series, nz = get_images_from_lif(file,i)
+                print(ns)
+                write_tif(max_int_proj(series), outpath + img_file[0:len(img_file)-4] + "-" + str(ns) + '.tif', ns, nz+1)
+
