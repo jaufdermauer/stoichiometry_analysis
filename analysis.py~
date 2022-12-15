@@ -1,38 +1,3 @@
-from skimage import io, draw, img_as_float
-from skimage.color import rgb2gray
-from skimage.morphology import reconstruction
-from skimage.feature import blob_dog
-from skimage import io
-from os.path import basename
-from scipy import signal, linalg
-from scipy.stats import gaussian_kde, binom
-from scipy.optimize import curve_fit, minimize
-from scipy.special import erfinv
-from scipy.interpolate import interp1d
-import numpy as np
-import glob, ast
-import math
-import matplotlib
-from matplotlib import pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
-from matplotlib import cm
-matplotlib.use('WXAgg')
-from matplotlib.backends.backend_wxagg import FigureCanvasWxAgg as FigureCanvas
-from matplotlib.backends.backend_wx import NavigationToolbar2Wx
-from matplotlib.figure import Figure
-from matplotlib import pyplot as plt
-from matplotlib import cm
-from os.path import basename, relpath, realpath
-from readlif.reader import LifFile
-from PIL import Image,ImageEnhance
-import tifffile
-import os
-
-import fitting
-
-
-import signal_processing
-
 class StchAnalysis:
     def __init__(self, folder_path, settings_gui_values,
                                     detection_gui_values,
@@ -107,9 +72,8 @@ class StchAnalysis:
         accuracies = []
         for replicate in self.replicates:
             if replicate.summary['ba_analysis'] and \
-                    ((monomers and replicate.summary['calibration']) or \
-                         (not monomers and replicate.summary['calibration']) or   #include calibration data in brightness analysis for stoichiometry calculation
-                            (not monomers and not replicate.summary['calibration'])):  
+                    ((monomers and replicate.summary['calibration']) or
+                         (not monomers and not replicate.summary['calibration'])):
                 for particle in replicate.particles:
                     if (monomers and particle.signals[brightness_method].steps_count == 1) or not monomers:
                         brightness.append(particle.signals[brightness_method].get_frame0_calibrated_brightness(background_method))
@@ -134,18 +98,18 @@ class StchAnalysis:
         if self.ba_monomers_intensities.any() and self.ba_all_intensities.any():
             self.accuracy_avg = np.mean(all_accuracies)
             if fitting_method == 'gaussfit':
-                self.mono_model = fitting.get_gaussian_model(self.ba_monomers_intensities)
+                self.mono_model = get_gaussian_model(self.ba_monomers_intensities)
                 self.ba_monomer_intensity = self.mono_model['mean']
-                self.all_models = fitting.get_gaussian_models(self.mono_model)
+                self.all_models = get_gaussian_models(self.mono_model)
                 self.ba_all_intensities_ys, bin_edges = np.histogram(self.ba_all_intensities,
-                                                 bins=fitting.get_bins_number(self.ba_all_intensities),
+                                                 bins=get_bins_number(self.ba_all_intensities),
                                                  normed=True)
                 self.ba_all_intensities_xs = [np.average(bin_edges[i:i+2]) for i, edge in enumerate(bin_edges) if i < len(bin_edges)-1]
             else:
                 self.mono_model = get_pdf_model(self.ba_monomers_intensities)
                 self.ba_monomer_intensity = self.mono_model['mean']
                 self.all_models = get_pdf_models(self.mono_model)
-                self.ba_all_intensities_xs, self.ba_all_intensities_ys = fitting.get_kde_values(self.ba_all_intensities,
+                self.ba_all_intensities_xs, self.ba_all_intensities_ys = get_kde_values(self.ba_all_intensities,
                                                                                         num_peaks=len(self.all_models))
 
             self.multiple_fitting_res = get_multiple_fitting(self.ba_all_intensities_xs,
@@ -232,7 +196,7 @@ class StchAnalysis:
         # First frames intensities
         str += "\nFirst frame intensities \n"
         for v in self.ba_all_intensities:
-            str += "{:.4f},".format(v)
+            str += "{:.4f} ".format(v)
 
         return str
 
@@ -377,7 +341,7 @@ class StchSequence:
             blobs_dog[:, 2] = blobs_dog[:, 2] * np.sqrt(2)
 
             for (x, y, r) in blobs_dog:
-                self.add_particle(int(x), int(y), self.parent.gui_values['def_roi_radius'])
+                self.add_particle(x, y, self.parent.gui_values['def_roi_radius'])
         return len(self.particles)
 
     def generate_background(self, frame, width):
@@ -503,7 +467,7 @@ class StchSequence:
                 widths.append(p.localization['d'])
 
         coef = erfinv(threshold)
-        w_mean = fitting.get_peak_by_kde(np.array(widths))[0]
+        w_mean = get_peak_by_kde(np.array(widths))[0]
         # Todo: Handle bad cases
         w_std = np.std(widths)
         idxs = []
@@ -520,9 +484,9 @@ class Particle:
         self.r = r
         self.gui_values = gui_values.copy()
         self.parent = parent
-        self.signals = {'sum': signal_processing.SumSignal(self),
-                        '2dgheight': signal_processing.GSignal(self),
-                        '2dgintegral': signal_processing.GSignal(self)}
+        self.signals = {'sum': SumSignal(self),
+                        '2dgheight': GSignal(self),
+                        '2dgintegral': GSignal(self)}
         self.localization = {}
 
     def localize(self, frame, fit_method):
@@ -542,7 +506,7 @@ class Particle:
         flat_Y = Y.flatten()
         flat_roi = roi.flatten()
 
-        Xout, Yout = fitting.get_outer_grid(self.x, self.y, self.r, 2)
+        Xout, Yout = get_outer_grid(self.x, self.y, self.r, 2)
 
         b = np.sqrt(np.mean(self.parent.video[frame][Xout, Yout]))
         b_std = np.std(self.parent.video[frame][Xout, Yout])
@@ -555,26 +519,22 @@ class Particle:
                 xc, yc, sig = v
                 res=0
                 for i, j, n in zip (flat_X, flat_Y, flat_roi):
-                    E = fitting.brightness_function(i, j, xc, yc, sig, N, a, b)
+                    E = brightness_function(i, j, xc, yc, sig, N, a, b)
                     sum = -( -E + n*math.log(E) - math.log(math.factorial(n)))
                     res += sum
                 return float(res)
             sol = minimize(mle_function, init_values, method='Nelder-Mead')
             opt_xc, opt_yc, opt_d = sol.x
         elif fit_method == 'LS':
-            def ls_function(xy, xc, yc, d):
-                return fitting.brightness_function(xy[0], xy[1], xc, yc, d, N, a, b)
+            def ls_function((x, y), xc, yc, d):
+                return brightness_function(x, y, xc, yc, d, N, a, b)
             try:
-                xy = [flat_X, flat_Y]
-                try:
-                    popt, pcov = curve_fit(ls_function,
-                                        xy,
-                                        flat_roi,
-                                        p0=init_values,
-                                        bounds=[[self.x-self.r, self.y-self.r, 0],
-                                                [self.x+self.r, self.y+self.r, a*self.r**2]])
-                except ValueError:
-                    return False
+                popt, pcov = curve_fit(ls_function,
+                                       (flat_X, flat_Y),
+                                       flat_roi,
+                                       p0=init_values,
+                                       bounds=[[self.x-self.r, self.y-self.r, 0],
+                                               [self.x+self.r, self.y+self.r, a*self.r**2]])
             except RuntimeError:
                 return False
             opt_xc, opt_yc, opt_d = popt
@@ -586,16 +546,16 @@ class Particle:
                              'd': opt_d,
                              'xc': opt_xc,
                              'yc': opt_yc,
-                             'accuracy_global': fitting.get_accuracy(N, opt_d, a, self.parent.summary['global_bckg_std']),
-                             'accuracy_local': fitting.get_accuracy(N, opt_d, a, b_std)}
+                             'accuracy_global': get_accuracy(N, opt_d, a, self.parent.summary['global_bckg_std']),
+                             'accuracy_local': get_accuracy(N, opt_d, a, b_std)}
 
         # Relocating the center, recreating the signals
         # and creating the respective initial values
         self.x = int(round(opt_xc))
         self.y = int(round(opt_yc))
-        self.signals = {'sum': signal_processing.SumSignal(self),
-                        '2dgheight': signal_processing.GSignal(self),
-                        '2dgintegral': signal_processing.GSignal(self)}
+        self.signals = {'sum': SumSignal(self),
+                        '2dgheight': GSignal(self),
+                        '2dgintegral': GSignal(self)}
         for signal in self.signals.values():
             signal.generate_frame0_values()
 
@@ -611,7 +571,7 @@ class Particle:
                            np.arange(self.y-self.r, self.y+self.r+1),
                            indexing='ij')
 
-        return fitting.brightness_function(X, Y,
+        return brightness_function(X, Y,
                                    self.localization['xc'],
                                    self.localization['yc'],
                                    self.localization['d'],
@@ -626,7 +586,7 @@ class Particle:
         :return:
         """
         if self.localization != {}:
-            self.localization['accuracy_global'] = fitting.get_accuracy(self.localization['N'],
+            self.localization['accuracy_global'] = get_accuracy(self.localization['N'],
                                                 self.localization['d'],
                                                 self.parent.parent.gui_values['pixel_size'],
                                                 self.parent.summary['global_bckg_std'])
@@ -635,54 +595,3 @@ class Particle:
         dist = np.sqrt((self.x - p.x)**2 + (self.y - p.y)**2)
         return dist < limit
 
-
-def get_images_from_lif(file, time, series):
-    img_0 = file.get_image(series)
-    images = []
-    nz = 0
-    print(time)
-    for i in img_0.get_iter_z(t=time, c=1):
-        nz += 1
-        images.append(np.array(i))
-    return images, nz
-
-def max_int_proj(images):
-    IM_MAX= np.max(images, axis=0)
-    images.insert(0,IM_MAX)
-    return images
-
-def write_tif(images, name, *dims):
-    t = 1
-    z = dims[1]
-    c = 1
-    x = images[0].shape[1]
-    y = images[0].shape[0]
-    s = dims[0]
-    npimages = np.array(np.reshape(np.array(images).flatten(), (t,z,c,y,x)), dtype = np.int16)
-
-    tifffile.imwrite(
-            name,
-            npimages,
-            imagej=True,
-            resolution=(1, 1),
-            photometric='minisblack',
-            metadata={'axes': 'TZCYX'})
-
-def process_folder(path, checked):
-    for img_file in os.listdir(path):
-        outpath = path
-        if img_file.endswith('lif'):
-            file = LifFile(path + img_file)
-            ns = 0
-            if checked:
-                try:
-                    os.mkdir(path + img_file[0:len(img_file)-4])
-                except FileExistsError:
-                    print("directory already exists")
-                outpath += img_file[0:len(img_file)-4]
-                outpath += "\\"
-            for i,s in enumerate(file.get_iter_image()):    #go through series
-                    for t,_ in enumerate(s.get_iter_t(c=1, z=0)):   #go through time slices
-                        series, nz = get_images_from_lif(file,t,i)
-                        write_tif(max_int_proj(series), outpath + img_file[0:len(img_file)-4] + "-" + str(ns) + "-t=" + str(t) + '.tif', ns, nz+1)
-                    ns += 1

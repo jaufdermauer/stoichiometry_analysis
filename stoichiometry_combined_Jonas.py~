@@ -1,0 +1,26 @@
+"""
+Classes and utilities for Stoichiometry Analysis
+"""
+
+__author__ = "Yuri Quintana"
+__copyright__ = "Copyright 2016"
+__credits__ = ["Yuri Quintana"]
+__license__ = "GPL"
+__version__ = "0.9"
+__maintainer__ = "Yuri Quintana"
+__email__ = "yuriqp@gmail.com"
+__status__ = "Testing"
+
+execfile("imports.py")
+execfile("GUI.py")
+execfile("analysis.py")
+execfile("signal_processing")
+#from stoichiometry_core import StchAnalysis, StchSequence, Particle, GSignal, get_bins_number, gaussian
+
+if __name__ == "__main__":
+    app = wx.App()
+    MainFrame().Show()
+    app.MainLoop()
+
+
+
