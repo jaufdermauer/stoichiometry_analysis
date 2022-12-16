@@ -30,6 +30,7 @@ import re
 
 import analysis
 
+
 class GWidget:
     def __init__(self, widget, key, default):
         self.widget = widget
