@@ -34,27 +34,39 @@ import fitting
 import signal_processing
 
 class StchAnalysis:
-    def __init__(self, folder_path, settings_gui_values,
+    def __init__(self, folder_path, calibration_path, settings_gui_values,
                                     detection_gui_values,
                                     particle_gui_values):
         self.replicates = []
         self.folder_path = folder_path
+        self.calibration_path = calibration_path
+
         videos_names = sorted([basename(x) for x in glob.glob(folder_path+"/*.tif")])
+        videos_names_cal = sorted([basename(x) for x in glob.glob(calibration_path+"/*.tif")])
         for img_name in videos_names:
             self.replicates.append(StchSequence(self,
                                                 img_name,
                                                 detection_gui_values,
-                                                particle_gui_values))
+                                                particle_gui_values,
+                                                False))
+
+        for img_name in videos_names_cal:
+            self.replicates.append(StchSequence(self,
+                                                img_name,
+                                                detection_gui_values,
+                                                particle_gui_values,
+                                                True))
+        videos_names += videos_names_cal
         self.names = [basename(i) for i in videos_names]
 
         self.gui_values = settings_gui_values.copy()
         self.local_bckg_width = 2
 
-    def get_replicate_by_name(self, name, load_video=True):
+    def get_replicate_by_name(self, name, load_video=True, calibration = False):
         idx = self.names.index(name)
-        return self.get_replicate_by_index(idx, load_video)
+        return self.get_replicate_by_index(idx, load_video, calibration)
 
-    def get_replicate_by_index(self, idx, load_video=True):
+    def get_replicate_by_index(self, idx, load_video=True, calibration = False):
         if load_video:
             self.replicates[idx].load_video()
         return self.replicates[idx]
@@ -260,7 +272,7 @@ class StchAnalysis:
 
 
 class StchSequence:
-    def __init__(self, parent, video_name, detection_gui_values, particle_gui_values):
+    def __init__(self, parent, video_name, detection_gui_values, particle_gui_values, calibration = True):
         self.parent = parent
         self.video_name = video_name
         self.video = None
@@ -274,12 +286,17 @@ class StchSequence:
         self.summary = {}
         for k in keys:
             self.summary[k] = 0
-        self.summary['calibration'] = False
+        self.summary['calibration'] = calibration
         self.summary['pb_analysis'] = True # Include in the photobleaching analysis
         self.summary['ba_analysis'] = True # Include in the brightness analysis
 
     def load_video(self):
-        self.video = io.MultiImage(self.parent.folder_path +'/' + self.video_name)[0]
+        if self.summary['calibration']:
+            print(self.parent.calibration_path +'\\' + self.video_name)
+            self.video = io.MultiImage(self.parent.calibration_path +'\\' + self.video_name)[0]
+        else:
+            print(self.parent.folder_path +'\\' + self.video_name)
+            self.video = io.MultiImage(self.parent.folder_path +'\\' + self.video_name)[0]
 
     def add_particle(self, x, y, r):
         """

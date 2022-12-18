@@ -124,7 +124,7 @@ class MainFrame(wx.Frame):
          #checkbox to save tif files in separate folder for better oversight
         cb_lts = wx.CheckBox(self.page_settings, label="save tif files to separate folders")
         cb_lts.Bind(wx.EVT_CHECKBOX, self.onCheckbox_lts(), id=cb_lts.GetId())
-        cb_lts.SetValue(False)
+        cb_lts.SetValue(True)
 
         left_box = wx.BoxSizer(wx.VERTICAL)
         self.folder_box_ltf = wx.StaticBox(
@@ -140,6 +140,23 @@ class MainFrame(wx.Frame):
         folder_sizer_ltf.Add(cb_lts, 0, wx.ALIGN_LEFT)
         left_box.Add(folder_sizer_ltf, 0)
         left_box.AddSpacer(10)
+        
+        self.folder_box_cal = wx.StaticBox(
+            self.page_settings, 0, " Calibration folder ")
+        folder_sizer_cal = wx.StaticBoxSizer(self.folder_box_cal, wx.VERTICAL)
+        self.folder_path_cal = wx.TextCtrl(self.page_settings, size=(400, -1))
+        folder_sizer_cal.Add(self.folder_path_cal, 0)
+        dir_btn = wx.Button(self.page_settings, label='Browse')
+        dir_btn.Bind(wx.EVT_BUTTON, self.onSelectCalibrationFolder,
+                     id=dir_btn.GetId())
+        folder_sizer_cal.Add(dir_btn, 0, wx.ALIGN_RIGHT)
+
+        left_box.Add(folder_sizer_cal, 0)
+        left_box.AddSpacer(10)
+
+        cb_subfolder = wx.CheckBox(self.page_settings, label="Analyze subfolders")
+        cb_subfolder.Bind(wx.EVT_CHECKBOX, self.onCheckbox_lts(), id=cb_subfolder.GetId())
+        cb_subfolder.SetValue(True)
 
         self.folder_box = wx.StaticBox(
             self.page_settings, 0, " Project's data folder ")
@@ -147,11 +164,17 @@ class MainFrame(wx.Frame):
         self.folder_path = wx.TextCtrl(self.page_settings, size=(400, -1))
         folder_sizer.Add(self.folder_path, 0)
         dir_btn = wx.Button(self.page_settings, label='Browse')
-        dir_btn.Bind(wx.EVT_BUTTON, self.onSelectDataFolder,
-                     id=dir_btn.GetId())
+        dir_btn.Bind(wx.EVT_BUTTON, lambda event: self.onSelectDataFolder(event, cb_subfolder.GetValue()), id=dir_btn.GetId())
         folder_sizer.Add(dir_btn, 0, wx.ALIGN_RIGHT)
+
+        folder_sizer.Add(cb_subfolder, 0, wx.ALIGN_LEFT)
+
         left_box.Add(folder_sizer, 0)
         left_box.AddSpacer(10)
+
+        start_btn = wx.Button(self.page_settings, label='Start analysis!')
+        start_btn.Bind(wx.EVT_BUTTON, self.onStart,
+                     id=start_btn.GetId())
 
         general_settings_box = wx.StaticBox(
             self.page_settings, 0, " General Settings ")
@@ -274,6 +297,11 @@ class MainFrame(wx.Frame):
             gwidget.setValue(value)
             self.widgets[widget.GetId()] = gwidget
             self.analysis_widgets.append(gwidget)
+
+        # start button
+        left_box.AddSpacer(10)
+        left_box.Add(start_btn, 0)
+        left_box.AddSpacer(10)
 
     def generate_detection_page(self):
 
@@ -1397,14 +1425,14 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
 
 # Setting s Events and methods
 
-    def onSelectDataFolder(self, event):
+    def onSelectDataFolder(self, event, checked):
         dlg = wx.DirDialog(self, "Select a folder")
         if dlg.ShowModal() == wx.ID_OK:
             dir_path = dlg.GetPath()
             self.folder_path.SetValue(dir_path)
 
             images = glob.glob(dir_path + '/*.tif')
-            if images:
+            if images or checked:
                 self.update_status_bar('Loading data folder ...')
 
                 analysis_gui_values = {}
@@ -1419,15 +1447,6 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
                 for w in self.particle_widgets:
                     particle_gui_values[w.key] = w.getValue()
 
-                self.stch_analysis = analysis.StchAnalysis(dir_path,
-                                                           analysis_gui_values,
-                                                           sequence_gui_values,
-                                                           particle_gui_values)
-                self.current_sequence = self.stch_analysis.get_replicate_by_index(
-                    0)
-                self.current_particle = None
-                self.update_project_files()
-
                 self.update_status_bar('Data folder succefully loaded!')
             else:
                 self.folder_path.SetValue('')
@@ -1436,51 +1455,71 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
                 self.update_status_bar('')
 
         dlg.Destroy()
-    # todo
 
+    #select folder for calibration files
+    def onSelectCalibrationFolder(self, event):
+        dlg = wx.DirDialog(self, "Select a folder")
+        if dlg.ShowModal() == wx.ID_OK:
+            dir_path = dlg.GetPath()
+            self.folder_path_cal.SetValue(dir_path)
+
+        dlg.Destroy()
+
+    #select folder to generate tifs out of lifs
     def onSelectDataFolder_ltf(self, event, checked):
         dlg = wx.DirDialog(self, "Select a folder")
         if dlg.ShowModal() == wx.ID_OK:
             dir_path = dlg.GetPath()
-            self.folder_path.SetValue(dir_path)
-
+            self.folder_path_ltf.SetValue(dir_path)
+            
             #generate tif files from available lif files:
             analysis.process_folder(dir_path + "\\", checked)
             print("tif files generates sucessfully !")
-
-            images = glob.glob(dir_path + '/*.tif')
-            if images:
-                self.update_status_bar('Loading data folder ...')
-
-                analysis_gui_values = {}
-                for w in self.analysis_widgets:
-                    analysis_gui_values[w.key] = w.getValue()
-
-                sequence_gui_values = {}
-                for w in self.sequence_widgets:
-                    sequence_gui_values[w.key] = w.getValue()
-
-                particle_gui_values = {}
-                for w in self.particle_widgets:
-                    particle_gui_values[w.key] = w.getValue()
-
-                self.stch_analysis = analysis.StchAnalysis(dir_path,
-                                                           analysis_gui_values,
-                                                           sequence_gui_values,
-                                                           particle_gui_values)
-                self.current_sequence = self.stch_analysis.get_replicate_by_index(
-                    0)
-                self.current_particle = None
-                self.update_project_files()
-
-                self.update_status_bar('Data folder succefully loaded!')
-            else:
-                self.folder_path.SetValue('')
-                wx.MessageBox('No TIFF images in selected folder',
-                              'Info', wx.OK | wx.ICON_ERROR)
-                self.update_status_bar('')
-
         dlg.Destroy()
+
+    #start analysis with paths from data and calibration
+    def onStart(self, event):
+        print("hello i was pressed")
+        rootdir = self.folder_path.GetValue()
+        print(rootdir)
+        for file in os.listdir(rootdir):
+            d = os.path.join(rootdir, file)
+            if os.path.isdir(d):
+                print(d)
+                istif = glob.glob(d + '/*.tif')
+                if istif:
+                    self.update_status_bar('Loading data folder ...')
+
+                    analysis_gui_values = {}
+                    for w in self.analysis_widgets:
+                        analysis_gui_values[w.key] = w.getValue()
+
+                    sequence_gui_values = {}
+                    for w in self.sequence_widgets:
+                        sequence_gui_values[w.key] = w.getValue()
+
+                    particle_gui_values = {}
+                    for w in self.particle_widgets:
+                        particle_gui_values[w.key] = w.getValue()
+
+                    self.stch_analysis = analysis.StchAnalysis(d, self.folder_path_cal.GetValue(),
+                                                            analysis_gui_values,
+                                                            sequence_gui_values,
+                                                            particle_gui_values)
+                    self.current_sequence = self.stch_analysis.get_replicate_by_index(
+                        0)
+                    self.current_particle = None
+                    self.update_project_files()
+
+                    self.update_status_bar('Data folder succefully loaded! Starting analysis ...')
+                    self.iterate()
+                    self.plotResults()
+                else:
+                    self.folder_path.SetValue('')
+                    wx.MessageBox('No TIFF images in selected sub-folder',
+                                'Info', wx.OK | wx.ICON_ERROR)
+                    self.update_status_bar('')
+            
 
     def update_project_files(self):
         """
@@ -1492,10 +1531,10 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
             #self.scrolled_panel_sizer.Remove(cb.Window)
             # cb.Window.destroy()
         if self.stch_analysis:
+            #all_replicates = self.stch_analysis.replicates + self.stch_analysis.replicates_cal
             for replicate in self.stch_analysis.replicates:
                 name = basename(replicate.video_name)
-                replicate = self.stch_analysis.get_replicate_by_name(
-                    name, load_video=False)
+                replicate = self.stch_analysis.get_replicate_by_name(name, False, replicate.summary['calibration'])
                 cb = wx.CheckBox(self.scrolled_panel, label=name)
                 cb.Bind(wx.EVT_CHECKBOX, self.onCalibration, id=cb.GetId())
                 cb.SetValue(replicate.summary['calibration'])
@@ -1766,14 +1805,17 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
         self.update_status_bar("Localization is done!")
 
     def onIterate(self, event):
+        iterate(self)
+    
+    def iterate(self):
         self.update_status_bar('Iterating ...')
-
+        #all_replicates = self.stch_analysis.replicates + self.stch_analysis.replicates_cal
         for x in self.stch_analysis.replicates:
             yt = basename(x.video_name)
 
             self.update_status_bar("Loading {} video ...".format(yt))
             self.current_sequence = self.stch_analysis.get_replicate_by_name(
-                yt)
+                yt, calibration = x.summary['calibration'])
             self.current_particle = None
             self.update_image_tab()
             self.update_status_bar("{} loaded!".format(yt))
@@ -2315,6 +2357,9 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
             "Brightness analysis results succefully exported!")
 
     def onPlotResults(self, event):
+        self.plotResults()
+
+    def plotResults():
         self.update_status_bar("Showing results ...")
         fig, axis = plt.subplots(1,2)
         axis[0].set_ylabel("counts")
