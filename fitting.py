@@ -106,7 +106,7 @@ def get_bins_number(values):
     """
     iqr = np.subtract(*np.percentile(values, [75, 25]))
     h = 2*iqr*np.power(len(values), -1.0/3.0)
-    return np.ceil((np.max(values)-np.min(values))/h)
+    return int(np.ceil((np.max(values)-np.min(values))/h))
 
 
 def get_outer_grid(x, y, width, outer_width):

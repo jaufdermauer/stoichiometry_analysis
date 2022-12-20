@@ -27,8 +27,10 @@ from mpl_toolkits.mplot3d import Axes3D
 from matplotlib import cm
 matplotlib.use('WXAgg')
 import re
+from natsort import natsorted
 
 import analysis
+import fitting
 
 class GWidget:
     def __init__(self, widget, key, default):
@@ -94,6 +96,7 @@ class MainFrame(wx.Frame):
         p.SetSizer(sizer)
         self.Maximize(True)
         self.p = p
+        self.stoich_calibration = -1
 # Pages
 
     def generate_menu_bar(self):
@@ -209,7 +212,7 @@ class MainFrame(wx.Frame):
         left_box.Add(general_settings_sizer, 0, wx.EXPAND)
         left_box.AddSpacer(10)
 
-        defaults_det_grid_sizer = wx.FlexGridSizer(3, 2, 2, 2)
+        defaults_det_grid_sizer = wx.FlexGridSizer(4, 2, 2, 2)
         defaults_det_grid_sizer.Add(wx.StaticText(
             self.page_settings, label=" min_sigma "), 0, wx.ALIGN_CENTER_VERTICAL)
         self.default_min_sigma = wx.TextCtrl(self.page_settings, size=(80, -1))
@@ -222,12 +225,21 @@ class MainFrame(wx.Frame):
         self.default_max_sigma.Bind(
             wx.EVT_TEXT, self.onChangeSettingsField, id=self.default_max_sigma.GetId())
         defaults_det_grid_sizer.Add(self.default_max_sigma, 0)
+
         defaults_det_grid_sizer.Add(wx.StaticText(
             self.page_settings, label=" threshold "), 0, wx.ALIGN_CENTER_VERTICAL)
         self.default_threshold = wx.TextCtrl(self.page_settings, size=(80, -1))
         self.default_threshold.Bind(
             wx.EVT_TEXT, self.onChangeSettingsField, id=self.default_threshold.GetId())
         defaults_det_grid_sizer.Add(self.default_threshold, 0, wx.EXPAND)
+
+        defaults_det_grid_sizer.Add(wx.StaticText(
+            self.page_settings, label=" iterations "), 0, wx.ALIGN_CENTER_VERTICAL)
+        self.iterations = wx.TextCtrl(
+            self.page_settings, size=(80, -1), value='4')
+        self.iterations.Bind(
+            wx.EVT_TEXT, self.onChangeSettingsField, id=self.iterations.GetId())
+        defaults_det_grid_sizer.Add(self.iterations, 0)
 
         part_detection_box = wx.StaticBox(
             self.page_settings, 0, " Particles Detection ")
@@ -283,10 +295,10 @@ class MainFrame(wx.Frame):
         defaults = [('photon_coef', self.photon_coef, 12.5),
                     ('frame_rate', self.frame_rate, 60),
                     ('pixel_size', self.pixel_size, 100),
-                    ('def_roi_radius', self.roi_radius, 3),
+                    ('def_roi_radius', self.roi_radius, 5),
                     ('def_min_sigma', self.default_min_sigma, 2.0),
                     ('def_max_sigma', self.default_max_sigma, 3.0),
-                    ('def_threshold', self.default_threshold, 0.0001),
+                    ('def_threshold', self.default_threshold, 0.000025),
                     ('def_median_offset', self.default_offset, 3),
                     ('def_bins', self.default_bins, 10)]
 
@@ -372,6 +384,7 @@ class MainFrame(wx.Frame):
         self.max_sigma.Bind(
             wx.EVT_TEXT, self.onChangeDetectionField, id=self.max_sigma.GetId())
         dog_params_sizer.Add(self.max_sigma, 0)
+
         dog_params_sizer.Add(wx.StaticText(
             self.page_detection, label=" threshold "), 0, wx.ALIGN_CENTER_VERTICAL)
         self.threshold = wx.TextCtrl(
@@ -379,8 +392,9 @@ class MainFrame(wx.Frame):
         self.threshold.Bind(
             wx.EVT_TEXT, self.onChangeDetectionField, id=self.threshold.GetId())
         dog_params_sizer.Add(self.threshold, 0)
+        
         dog_sizer.Add(dog_params_sizer, 0)
-
+        
         dog_sizer.AddSpacer(5)
         self.detect_btn = wx.Button(self.page_detection, label='Detect (DoG)')
         self.detect_btn.Bind(wx.EVT_BUTTON, self.onDetect,
@@ -1479,10 +1493,13 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
 
     #start analysis with paths from data and calibration
     def onStart(self, event):
-        print("hello i was pressed")
         rootdir = self.folder_path.GetValue()
         print(rootdir)
-        for file in os.listdir(rootdir):
+        stoichiometries = []    #kinetics of stoichiometry
+        n_particles = []    #kinetics of number of particles per image (todo: per mitochondrial area)
+        datas = []
+        calibrated = False
+        for file in natsorted(os.listdir(rootdir)):
             d = os.path.join(rootdir, file)
             if os.path.isdir(d):
                 print(d)
@@ -1503,6 +1520,7 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
                         particle_gui_values[w.key] = w.getValue()
 
                     self.stch_analysis = analysis.StchAnalysis(d, self.folder_path_cal.GetValue(),
+                                                            calibrated,
                                                             analysis_gui_values,
                                                             sequence_gui_values,
                                                             particle_gui_values)
@@ -1513,14 +1531,60 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
 
                     self.update_status_bar('Data folder succefully loaded! Starting analysis ...')
                     self.iterate()
-                    self.plotResults()
+                    self.update_brightness_tab()
+                    int_data = self.plotResults(calibrated)
+                    stoichiometry = []
+                    n_particle = []
+                    for dat in int_data:
+                        stoichiometry.append(np.average(np.array(dat))/self.stoich_calibration*32)
+                        n_particle.append(len(dat))
+                    datas.append(int_data)
+                    stoichiometries.append(stoichiometry)
+                    n_particles.append(n_particle)
+                    calibrated = True
                 else:
                     self.folder_path.SetValue('')
                     wx.MessageBox('No TIFF images in selected sub-folder',
                                 'Info', wx.OK | wx.ICON_ERROR)
                     self.update_status_bar('')
-            
+        
+        #we now have an array with a=[[1(t=1),1(t=2),...],[2(t=1),2(t=2),...],...] and we want [[1(t=1),2(t=1),...],[1(t=2),2[t=2],...],...] to be able to perform np.mean(i for i in a)
+        s_reshaped = np.array(list(zip(*stoichiometries)))
+        s_kinetics = np.array(list(zip(*[(np.mean(i),np.std(i)) for i in s_reshaped])))
 
+        npart_reshaped = np.array(list(zip(*n_particles)))
+        npart_kinetics = np.array(list(zip(*[(np.mean(i),np.std(i)) for i in npart_reshaped])))
+
+        data_reshaped = np.array(list(zip(*datas)))
+
+        fig, axis = plt.subplots(1,3)
+        axis[0].set_ylabel("counts")
+        axis[0].set_xlabel("brightness (mol. units)")
+        axis[0].set_ylim(0,300)
+
+        axis[1].set_ylabel("stoichiometry")
+        axis[1].set_xlabel("time after tmre loss (min)")
+        axis[1].set_xlim(0,110)
+        axis[1].set_ylim(0,200)
+
+        axis[2].set_ylabel("# of spots per area")
+        axis[2].set_xlabel("time after tmre loss (min)")
+        axis[2].set_xlim(0,110)
+        axis[2].set_ylim(0,1000)
+        
+        dlg = wx.FileDialog(self, "Select a file: ", style=wx.FD_SAVE)
+
+        for i,p_int in enumerate(datas):
+            axis[0].hist(p_int[-1]/self.stoich_calibration*32, alpha = 0.6, label = str(i), bins=fitting.get_bins_number(p_int[0]))    #histogram with brightness per spot
+        axis[0].set_xlim(0,600)
+        axis[0].legend()
+
+        axis[1].plot(np.arange(0, len(s_kinetics[0])*10, 10), s_kinetics[0])
+        axis[1].fill_between(np.arange(0, len(s_kinetics[0])*10, 10), s_kinetics[0] - s_kinetics[1], s_kinetics[0] + s_kinetics[1], alpha=0.2)
+        axis[2].plot(np.arange(0, len(npart_kinetics[0])*10, 10), npart_kinetics[0])
+        axis[2].fill_between(np.arange(0, len(npart_kinetics[0])*10, 10), npart_kinetics[0] - npart_kinetics[1], npart_kinetics[0] + npart_kinetics[1], alpha=0.2)
+
+        fig.show()
     def update_project_files(self):
         """
         Update the list of files of the project
@@ -1659,8 +1723,8 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
 
     def update_main_image(self, image, title=""):
         self.page_detection_image_sizer.Hide(self.page_detection_image_panel)
-        # self.page_detection_image_sizer.Remove(self.page_detection_image_panel)
-        # self.page_detection_image_panel.Destroy()
+       # self.page_detection_image_sizer.Remove(self.page_detection_image_panel)
+        self.page_detection_image_panel.Destroy()
         self.page_detection_image_panel = wx.Panel(self.page_detection)
 
         if image is not None:
@@ -1738,10 +1802,11 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
                         pass
 
             canvas.mpl_connect('button_press_event', onClick)
-
-            toolbar = NavigationToolbar2Wx(canvas)
-            toolbar.Realize()
-
+            try:
+                toolbar = NavigationToolbar2Wx(canvas)
+                toolbar.Realize()
+            except wx._core.wxAssertionError:
+                print("canvas error")
             panel_sizer = wx.BoxSizer(wx.HORIZONTAL)
             panel_sizer.Add(canvas, 1, wx.EXPAND)
             panel_sizer.Add(toolbar, 0)
@@ -1837,8 +1902,8 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
             # self.show_check_box.SetValue(True)
             # self.update_image_tab()
             #self.update_status_bar("Background ROIs generated!")
-
-            for itnum in range(8):
+            
+            for itnum in range(int(self.iterations.GetValue())):
                 try:
                     print(itnum)
                     self.update_status_bar('Iterating ...')
@@ -2357,14 +2422,15 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
             "Brightness analysis results succefully exported!")
 
     def onPlotResults(self, event):
-        self.plotResults()
+        self.plotResults(False)
 
-    def plotResults():
+    def plotResults(self, calibrated):
         self.update_status_bar("Showing results ...")
         fig, axis = plt.subplots(1,2)
         axis[0].set_ylabel("counts")
         axis[0].set_xlabel("brightness")
         #get data from string to float
+
         str = self.stch_analysis.export_brightness_3()
         splitstr = str.split("\n")[3].split(",")[0:-2]
 
@@ -2382,16 +2448,21 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
                     splitstr.pop(0)
             if not replicate.summary['calibration']:
                 int_data.append(single_data)
-        np_int_calibration = np.array(int_calibration).flatten()
-        stich_calibration = np.average(np_int_calibration)
+        if not calibrated:
+            self.stoich_calibration = np.average(np.array(int_calibration).flatten())
+            print(self.stoich_calibration)
+
         stoichiometry = []
+        n_particles = []
         for dat in int_data:
-            stoichiometry.append(np.average(np.array(dat))/stich_calibration*32)
-            axis[0].hist(np.array(dat)/stich_calibration*32, alpha = 0.6)
+            stoichiometry.append(np.average(np.array(dat))/self.stoich_calibration*32)
+            n_particles.append(len(dat))
+            axis[0].hist(np.array(dat)/self.stoich_calibration*32, alpha = 0.6)
         axis[1].set_ylabel("stoichiometry")
         axis[1].set_xlabel("time after treatment (min)")
         axis[1].plot(np.arange(0, len(stoichiometry)*10, 10), stoichiometry)
         fig.show()
+        return (int_data)
 
     def onUpdateBrightness(self, event):
         if 0.0 <= self.widgets[self.ba_efficiency.GetId()].getValue() <= 1.0:

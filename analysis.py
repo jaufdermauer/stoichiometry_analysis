@@ -34,7 +34,7 @@ import fitting
 import signal_processing
 
 class StchAnalysis:
-    def __init__(self, folder_path, calibration_path, settings_gui_values,
+    def __init__(self, folder_path, calibration_path, cal, settings_gui_values,
                                     detection_gui_values,
                                     particle_gui_values):
         self.replicates = []
@@ -42,25 +42,26 @@ class StchAnalysis:
         self.calibration_path = calibration_path
 
         videos_names = sorted([basename(x) for x in glob.glob(folder_path+"/*.tif")])
-        videos_names_cal = sorted([basename(x) for x in glob.glob(calibration_path+"/*.tif")])
         for img_name in videos_names:
             self.replicates.append(StchSequence(self,
                                                 img_name,
                                                 detection_gui_values,
                                                 particle_gui_values,
                                                 False))
-
-        for img_name in videos_names_cal:
-            self.replicates.append(StchSequence(self,
-                                                img_name,
-                                                detection_gui_values,
-                                                particle_gui_values,
-                                                True))
-        videos_names += videos_names_cal
+        if cal == False:
+            videos_names_cal = sorted([basename(x) for x in glob.glob(calibration_path+"/*.tif")])
+            for img_name in videos_names_cal:
+                self.replicates.append(StchSequence(self,
+                                                    img_name,
+                                                    detection_gui_values,
+                                                    particle_gui_values,
+                                                    True))
+            videos_names += videos_names_cal
         self.names = [basename(i) for i in videos_names]
 
         self.gui_values = settings_gui_values.copy()
         self.local_bckg_width = 2
+        self.ba_all_intensities = []
 
     def get_replicate_by_name(self, name, load_video=True, calibration = False):
         idx = self.names.index(name)
