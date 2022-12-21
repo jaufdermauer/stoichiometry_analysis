@@ -185,9 +185,14 @@ class SumSignal(GSignal):
                 intensities.append(self.parent.parent.video[frame][p[0],p[1]])
             except IndexError: # Border was on the edge of the image
                 pass
-        bckg_avg = fitting.get_peak_by_kde(np.array(intensities))[0][0]
-        bckg = bckg_avg*len(rr1)
-        return bckg_avg, bckg
+        bg = fitting.get_peak_by_kde(np.array(intensities))[0][0]
+        if bg == False:
+            return 0, 0
+            print("background could not be calculated and is assumed 0")
+        else:
+            bckg_avg = bg
+            bckg = bckg_avg*len(rr1)
+            return bckg_avg, bckg
 
     def get_frame0_calibrated_brightness(self, bckg_method):
         """

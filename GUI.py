@@ -1462,6 +1462,17 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
                     particle_gui_values[w.key] = w.getValue()
 
                 self.update_status_bar('Data folder succefully loaded!')
+                if images and not checked:
+                    self.stch_analysis = analysis.StchAnalysis(self.folder_path.GetValue(), self.folder_path_cal.GetValue(),
+                                                            False,
+                                                            analysis_gui_values,
+                                                            sequence_gui_values,
+                                                            particle_gui_values)
+                    self.current_sequence = self.stch_analysis.get_replicate_by_index(
+                        0)
+                    self.current_particle = None
+                    self.update_project_files()
+                    self.update_brightness_tab()
             else:
                 self.folder_path.SetValue('')
                 wx.MessageBox('No TIFF images in selected folder',
