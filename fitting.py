@@ -77,15 +77,12 @@ def get_kde_values(values, num_samples=100, num_peaks=1):
     xs, ys
     """
     # Todo: Set a bandwidth according to num_peaks
-    # Todo: Catch exception
-    try:
-        kde = gaussian_kde(values, 'silverman')
-        ini = np.min(values)
-        end = np.max(values)
-        xs = np.linspace(ini, end, num_samples)
-        return xs, kde.pdf(xs)
-    except np.linalg.LinAlgError:
-        return False
+    # Todo: Catch exception #done in signal_processing
+    kde = gaussian_kde(values, 'silverman')
+    ini = np.min(values)
+    end = np.max(values)
+    xs = np.linspace(ini, end, num_samples)
+    return xs, kde.pdf(xs)
 
 def get_peak_by_kde(values, num_samples=100, num_peaks=1):
     """

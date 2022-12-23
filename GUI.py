@@ -1505,7 +1505,6 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
     #start analysis with paths from data and calibration
     def onStart(self, event):
         rootdir = self.folder_path.GetValue()
-        print(rootdir)
         stoichiometries = []    #kinetics of stoichiometry
         n_particles = []    #kinetics of number of particles per image (todo: per mitochondrial area)
         datas = []
@@ -1568,32 +1567,41 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
 
         data_reshaped = np.array(list(zip(*datas)))
 
-        fig, axis = plt.subplots(1,3)
-        axis[0].set_ylabel("counts")
-        axis[0].set_xlabel("brightness (mol. units)")
-        axis[0].set_ylim(0,300)
+        fig, axis = plt.subplots(2,3)
+        axis[0][0].set_ylabel("counts")
+        axis[0][0].set_xlabel("brightness (mol. units)")
+        axis[0][0].set_ylim(0,500)
+        axis[0][0].set_xlim(0,600)
 
-        axis[1].set_ylabel("stoichiometry")
-        axis[1].set_xlabel("time after tmre loss (min)")
-        axis[1].set_xlim(0,110)
-        axis[1].set_ylim(0,200)
+        axis[0][1].set_ylabel("stoichiometry")
+        axis[0][1].set_xlabel("time after tmre loss (min)")
+        axis[0][1].set_xlim(0,110)
+        axis[0][1].set_ylim(0,200)
 
-        axis[2].set_ylabel("# of spots per area")
-        axis[2].set_xlabel("time after tmre loss (min)")
-        axis[2].set_xlim(0,110)
-        axis[2].set_ylim(0,1000)
+        axis[0][2].set_ylabel("# of spots per area")
+        axis[0][2].set_xlabel("time after tmre loss (min)")
+        axis[0][2].set_xlim(0,110)
+        axis[0][2].set_ylim(0,1000)
         
         dlg = wx.FileDialog(self, "Select a file: ", style=wx.FD_SAVE)
 
+        #plot cumulative distribution of all particles from all samples at time where stoichiometry is max
+        #first find maximum
+        max_value = max(s_kinetics[0])
+        #find index of maximum (if there are multiple take the first one)
+        max_index = int([index for index, item in enumerate(s_kinetics[0]) if item == max_value][0])
+        print("maximum oligomerization after " + str(max_index*10) + " minutes")
+        data_cumulative = []
         for i,p_int in enumerate(datas):
-            axis[0].hist(p_int[-1]/self.stoich_calibration*32, alpha = 0.6, label = str(i), bins=fitting.get_bins_number(p_int[0]))    #histogram with brightness per spot
-        axis[0].set_xlim(0,600)
-        axis[0].legend()
+            data_cumulative.append(p_int[max_index]/self.stoich_calibration*32)
+        flat_data_cumulative = [num for sublist in data_cumulative for num in sublist]
+        axis[0][0].hist(np.array(flat_data_cumulative, dtype = float), alpha = 0.6, bins=fitting.get_bins_number(np.array(flat_data_cumulative, dtype = float)))   #histogram with brightness per spot
+        #axis[0][0].legend()
 
-        axis[1].plot(np.arange(0, len(s_kinetics[0])*10, 10), s_kinetics[0])
-        axis[1].fill_between(np.arange(0, len(s_kinetics[0])*10, 10), s_kinetics[0] - s_kinetics[1], s_kinetics[0] + s_kinetics[1], alpha=0.2)
-        axis[2].plot(np.arange(0, len(npart_kinetics[0])*10, 10), npart_kinetics[0])
-        axis[2].fill_between(np.arange(0, len(npart_kinetics[0])*10, 10), npart_kinetics[0] - npart_kinetics[1], npart_kinetics[0] + npart_kinetics[1], alpha=0.2)
+        axis[0][1].plot(np.arange(0, len(s_kinetics[0])*10, 10), s_kinetics[0])
+        axis[0][1].fill_between(np.arange(0, len(s_kinetics[0])*10, 10), s_kinetics[0] - s_kinetics[1], s_kinetics[0] + s_kinetics[1], alpha=0.2)
+        axis[0][2].plot(np.arange(0, len(npart_kinetics[0])*10, 10), npart_kinetics[0])
+        axis[0][2].fill_between(np.arange(0, len(npart_kinetics[0])*10, 10), npart_kinetics[0] - npart_kinetics[1], npart_kinetics[0] + npart_kinetics[1], alpha=0.2)
 
         fig.show()
     def update_project_files(self):

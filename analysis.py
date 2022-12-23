@@ -27,10 +27,9 @@ from readlif.reader import LifFile
 from PIL import Image,ImageEnhance
 import tifffile
 import os
+from natsort import natsorted
 
 import fitting
-
-
 import signal_processing
 
 class StchAnalysis:
@@ -41,7 +40,7 @@ class StchAnalysis:
         self.folder_path = folder_path
         self.calibration_path = calibration_path
 
-        videos_names = sorted([basename(x) for x in glob.glob(folder_path+"/*.tif")])
+        videos_names = natsorted([basename(x) for x in glob.glob(folder_path+"/*.tif")])
         for img_name in videos_names:
             self.replicates.append(StchSequence(self,
                                                 img_name,
