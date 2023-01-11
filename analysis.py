@@ -33,34 +33,45 @@ import fitting
 import signal_processing
 
 class StchAnalysis:
-    def __init__(self, folder_path, calibration_path, cal, settings_gui_values,
-                                    detection_gui_values,
-                                    particle_gui_values):
-        self.replicates = []
-        self.folder_path = folder_path
-        self.calibration_path = calibration_path
+    def __init__(self, *args):
+        
+        if len(args) > 3:
+            self.replicates = []
+            self.folder_path = args[0]
+            self.calibration_path = args[1]
+            cal = args[2]
+            settings_gui_values = args[3]
+            detection_gui_values = args[4]
+            particle_gui_values = args[5]
 
-        videos_names = natsorted([basename(x) for x in glob.glob(folder_path+"/*.tif")])
-        for img_name in videos_names:
-            self.replicates.append(StchSequence(self,
-                                                img_name,
-                                                detection_gui_values,
-                                                particle_gui_values,
-                                                False))
-        if cal == False:
-            videos_names_cal = sorted([basename(x) for x in glob.glob(calibration_path+"/*.tif")])
-            for img_name in videos_names_cal:
+            videos_names = natsorted([basename(x) for x in glob.glob(self.folder_path+"/*.tif")])
+            for img_name in videos_names:
                 self.replicates.append(StchSequence(self,
                                                     img_name,
                                                     detection_gui_values,
                                                     particle_gui_values,
-                                                    True))
-            videos_names += videos_names_cal
-        self.names = [basename(i) for i in videos_names]
+                                                    False))
+            if cal == False:
+                videos_names_cal = sorted([basename(x) for x in glob.glob(self.calibration_path+"/*.tif")])
+                for img_name in videos_names_cal:
+                    self.replicates.append(StchSequence(self,
+                                                        img_name,
+                                                        detection_gui_values,
+                                                        particle_gui_values,
+                                                        True))
+                videos_names += videos_names_cal
+            self.names = [basename(i) for i in videos_names]
 
-        self.gui_values = settings_gui_values.copy()
-        self.local_bckg_width = 2
-        self.ba_all_intensities = []
+            self.gui_values = settings_gui_values.copy()
+            self.local_bckg_width = 2
+            self.ba_all_intensities = []
+            #overloaded constructor to init only intensities from csv file
+        #else:
+        #    self.ba_all_intensities = intensities
+
+
+        
+
 
     def get_replicate_by_name(self, name, load_video=True, calibration = False):
         idx = self.names.index(name)

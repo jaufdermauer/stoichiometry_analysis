@@ -89,7 +89,7 @@ class MainFrame(wx.Frame):
         self.generate_photobleaching_page()
         self.generate_brightness_page()
         self.generate_stats_page()
-
+        self.generate_analysis_page()
         self.status_bar = self.CreateStatusBar()
 
         sizer = wx.BoxSizer()
@@ -98,6 +98,17 @@ class MainFrame(wx.Frame):
         self.Maximize(True)
         self.p = p
         self.stoich_calibration = -1
+
+        #data storage in dictionary
+        self.fieldnames = ["experiment","position","time","index","intensity"]
+        #dictionary for characterization of spots
+        self.data = {
+            self.fieldnames[0] : [],    #experiment
+            self.fieldnames[1] : [],    #position
+            self.fieldnames[2] : [],    #time
+            self.fieldnames[3] : [],     #index
+            self.fieldnames[4] : []     #intensity
+            }
 # Pages
 
     def generate_menu_bar(self):
@@ -1149,6 +1160,40 @@ class MainFrame(wx.Frame):
         self.tab_stats_main_box.Add(self.stats_panel_sizer, 1, wx.EXPAND)
         self.page_stats.SetSizer(self.tab_stats_main_box)
 
+    def generate_analysis_page(self):
+        self.page_analysis = wx.Panel(self.nb)
+        left_box_analysis = wx.BoxSizer(wx.VERTICAL)
+        self.folder_box_loadcsv = wx.StaticBox(
+            self.page_analysis, 0, " Load csv ")
+        folder_sizer_loadcsv = wx.StaticBoxSizer(self.folder_box_loadcsv, wx.VERTICAL)
+        self.folder_path_loadcsv = wx.TextCtrl(self.page_analysis, size=(400, -1))
+        folder_sizer_loadcsv.Add(self.folder_path_loadcsv, 0)
+        dir_btn_loadcsv = wx.Button(self.page_analysis, label='Browse')
+        dir_btn_loadcsv.Bind(wx.EVT_BUTTON, self.onSelectDataFolder_loadcsv,
+                     id=dir_btn_loadcsv.GetId())
+        folder_sizer_loadcsv.Add(dir_btn_loadcsv, 0, wx.ALIGN_RIGHT)
+        left_box_analysis.Add(folder_sizer_loadcsv, 0)
+        self.page_analysis.SetSizer(left_box_analysis, wx.EXPAND)
+        self.nb.AddPage(self.page_analysis, "Analysis")
+
+        self.csv_files_box = wx.StaticBox(
+            self.page_analysis, 1, " Target Files ", size=(400, -1))
+        self.folder_sizer_csvfiles = wx.StaticBoxSizer(self.csv_files_box, wx.VERTICAL)
+        left_box_analysis.AddSpacer(10)
+        left_box_analysis.Add(self.folder_sizer_csvfiles, 0)
+        self.csv_list_spanel = scrolled.ScrolledPanel(self.page_analysis)
+        self.csv_list_spanel.SetAutoLayout(1)
+        self.csv_list_spanel.SetupScrolling()
+        self.csv_list_spanel_sizer = wx.BoxSizer(wx.VERTICAL)
+        self.csv_list_spanel.SetSizer(self.csv_list_spanel_sizer)
+        self.folder_sizer_csvfiles.Add(self.csv_list_spanel, 1, wx.EXPAND)
+
+        analysis_results_btn = wx.Button(
+            self.page_analysis, label="Show results", size=(80, -1))
+        analysis_results_btn.Bind(
+            wx.EVT_BUTTON, self.onPlotResults, id=analysis_results_btn.GetId())
+        left_box_analysis.Add(analysis_results_btn, 0)
+
     def generate_gui_help(self):
         self.folder_box.SetToolTipString(
             "Folder containing all the videos (.tif) ")
@@ -1489,6 +1534,43 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
 
         dlg.Destroy()
 
+    def onSelectDataFolder_loadcsv(self, event):
+        dlg = wx.FileDialog(self, "Select file(s)", "", "",
+                                   "*.csv", wx.FD_MULTIPLE)
+        if dlg.ShowModal() == wx.ID_OK:
+            dir_path = dlg.GetPaths()
+            print(dir_path)
+            self.update_status_bar('Csv files succefully loaded!')
+
+            for cb in self.csv_list_spanel_sizer.GetChildren():  # Removing previous list
+                self.csv_list_spanel_sizer.Hide(cb.Window)
+                #self.scrolled_panel_sizer.Remove(cb.Window)
+                # cb.Window.destroy()
+            self.stch_analysis = analysis.StchAnalysis(self)
+            for csvfile in dir_path:
+                name = csvfile.split("\\")[-1]
+                cb = wx.CheckBox(self.csv_list_spanel, label=name)
+                cb.Bind(wx.EVT_CHECKBOX, self.onCalibration, id=cb.GetId())
+                cb.SetValue(True)
+                print(name)
+                self.csv_list_spanel_sizer.Add(cb, 0)
+
+                #read in data in dictionary
+                with open(csvfile, newline='') as csv_file:
+                    reader = csv.reader(csv_file, delimiter=' ', quotechar='|')
+                    for r,row in enumerate(reader):
+                        if r > 3:
+                            for i,key in enumerate(self.stch_analysis.fieldnames):
+                                try:
+                                    print(row)
+                                    self.stch_analysis.data[key].append(row[0].split(',')[i])
+                                except IndexError:
+                                    continue
+            print(self.stch_analysis.data)
+            self.csv_list_spanel_sizer.Layout()
+            self.folder_sizer_csvfiles.Layout()
+            self.page_analysis.Layout()
+
     #select folder for calibration files
     def onSelectCalibrationFolder(self, event):
         dlg = wx.DirDialog(self, "Select a folder")
@@ -1517,7 +1599,7 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
         n_particles = []    #kinetics of number of particles per image (todo: per mitochondrial area)
         datas = []
         calibrated = False
-        for file in natsorted(os.listdir(rootdir)):
+        for pos,file in enumerate(natsorted(os.listdir(rootdir))):
             d = os.path.join(rootdir, file)
             if os.path.isdir(d):
                 print(d)
@@ -1553,13 +1635,20 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
                     int_data = self.plotResults(calibrated)
                     stoichiometry = []
                     n_particle = []
-                    for dat in int_data:
+                    for t,dat in enumerate(int_data):
                         stoichiometry.append(np.average(np.array(dat))/self.stoich_calibration*32)
                         n_particle.append(len(dat))
+                        for index,intensity in enumerate(dat):
+                            self.data[self.fieldnames[0]].append(rootdir.split("\\")[-1])
+                            self.data[self.fieldnames[1]].append(pos)
+                            self.data[self.fieldnames[2]].append(t)
+                            self.data[self.fieldnames[3]].append(index)
+                            self.data[self.fieldnames[4]].append(intensity)
                     datas.append(int_data)
                     stoichiometries.append(stoichiometry)
                     n_particles.append(n_particle)
                     calibrated = True
+                    print(self.data)
                 else:
                     self.folder_path.SetValue('')
                     wx.MessageBox('No TIFF images in selected sub-folder',
@@ -2451,24 +2540,18 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
     # export dictionary as .csv
     def onExportcsv(self, *params):    #params: samples = [], position (1-10)
         self.update_status_bar("Exporting analysis results ...")
-        str = self.stch_analysis.export_brightness_3()
+        #str = self.stch_analysis.export_brightness_3()
         dlg = wx.FileDialog(self, "Select a file: ", style=wx.FD_SAVE)
         # separate into lines:
-        splitstr = str.split("\n")[3].split(",")[0:-2]
-        fieldnames = ["position", "index", "intensity"]
-        #dictionary for characterization of spots
-        data = {
-            fieldnames[0] : [], #params[1]
-            fieldnames[1] : [],    #params[2]
-            fieldnames[2] : []
-        }
-        for rep,replicate in enumerate(self.stch_analysis.replicates):
-            for index in range(len(replicate.particles)-1):
-                data[fieldnames[0]].append(rep)
-                data[fieldnames[1]].append(index)
-                data[fieldnames[2]].append(float(splitstr[0]))
-                splitstr.pop(0)
+        #splitstr = str.split("\n")[3].split(",")[0:-2]
         if dlg.ShowModal() == wx.ID_OK:
+            # for rep,replicate in enumerate(self.stch_analysis.replicates):
+            #     for index in range(len(replicate.particles)-1):
+            #         self.stch_analysis.data[self.stch_analysis.fieldnames[0]].append(dlg.GetPath().split("\\")[-1].split(".")[0])
+            #         self.stch_analysis.data[self.stch_analysis.fieldnames[1]].append(rep)
+            #         self.stch_analysis.data[self.stch_analysis.fieldnames[2]].append(index)
+            #         self.stch_analysis.data[self.stch_analysis.fieldnames[3]].append(float(splitstr[0]))
+            #         splitstr.pop(0)
             file = dlg.GetPath()
             with open(file, 'w', newline='') as csvfile:
                 writer = csv.writer(csvfile)
@@ -2477,8 +2560,8 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
                 options_vals = [*self.stch_analysis.gui_values.values(),self.stoich_calibration]
                 writer.writerow(options_vals)
                 writer.writerow('') #add empty line
-                writer.writerow(data.keys())
-                writer.writerows(zip(*data.values()))
+                writer.writerow(self.data.keys())
+                writer.writerows(zip(*self.data.values()))
         self.update_status_bar(
             "Brightness analysis results succefully exported as csv!")
 
