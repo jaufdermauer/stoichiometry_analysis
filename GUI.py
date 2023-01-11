@@ -28,6 +28,7 @@ from matplotlib import cm
 matplotlib.use('WXAgg')
 import re
 from natsort import natsorted
+import csv
 
 import analysis
 import fitting
@@ -299,6 +300,7 @@ class MainFrame(wx.Frame):
                     ('def_min_sigma', self.default_min_sigma, 2.0),
                     ('def_max_sigma', self.default_max_sigma, 3.0),
                     ('def_threshold', self.default_threshold, 0.000025),
+                    ('def_iterations', self.iterations, 4),
                     ('def_median_offset', self.default_offset, 3),
                     ('def_bins', self.default_bins, 10)]
 
@@ -1056,6 +1058,11 @@ class MainFrame(wx.Frame):
         ba_export3_btn.Bind(
             wx.EVT_BUTTON, self.onExportBrightness3, id=ba_export3_btn.GetId())
 
+        ba_export_csv = wx.Button(
+            self.page_brightness, label="Export as csv", size=(80, -1))
+        ba_export_csv.Bind(
+            wx.EVT_BUTTON, self.onExportcsv, id=ba_export_csv.GetId())
+
         ba_results_btn = wx.Button(
             self.page_brightness, label="Show results", size=(80, -1))
         ba_results_btn.Bind(
@@ -1100,6 +1107,7 @@ class MainFrame(wx.Frame):
         ba_upbar_sizer.Add(ba_export1_btn, 1, wx.ALIGN_CENTER_VERTICAL)
         ba_upbar_sizer.Add(ba_export2_btn, 1, wx.ALIGN_CENTER_VERTICAL)
         ba_upbar_sizer.Add(ba_export3_btn, 1, wx.ALIGN_CENTER_VERTICAL)
+        ba_upbar_sizer.Add(ba_export_csv, 1, wx.ALIGN_CENTER_VERTICAL)
 
         self.ba_right_sizer = wx.BoxSizer(wx.VERTICAL)
         self.ba_right_sizer.Add(ba_upbar_sizer, 0, wx.EXPAND)
@@ -2440,6 +2448,40 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
         self.update_status_bar(
             "Brightness analysis results succefully exported!")
 
+    # export dictionary as .csv
+    def onExportcsv(self, *params):    #params: samples = [], position (1-10)
+        self.update_status_bar("Exporting analysis results ...")
+        str = self.stch_analysis.export_brightness_3()
+        dlg = wx.FileDialog(self, "Select a file: ", style=wx.FD_SAVE)
+        # separate into lines:
+        splitstr = str.split("\n")[3].split(",")[0:-2]
+        fieldnames = ["position", "index", "intensity"]
+        #dictionary for characterization of spots
+        data = {
+            fieldnames[0] : [], #params[1]
+            fieldnames[1] : [],    #params[2]
+            fieldnames[2] : []
+        }
+        for rep,replicate in enumerate(self.stch_analysis.replicates):
+            for index in range(len(replicate.particles)-1):
+                data[fieldnames[0]].append(rep)
+                data[fieldnames[1]].append(index)
+                data[fieldnames[2]].append(float(splitstr[0]))
+                splitstr.pop(0)
+        if dlg.ShowModal() == wx.ID_OK:
+            file = dlg.GetPath()
+            with open(file, 'w', newline='') as csvfile:
+                writer = csv.writer(csvfile)
+                options_keys = [*self.stch_analysis.gui_values.keys(), 'calibration']
+                writer.writerow(options_keys)
+                options_vals = [*self.stch_analysis.gui_values.values(),self.stoich_calibration]
+                writer.writerow(options_vals)
+                writer.writerow('') #add empty line
+                writer.writerow(data.keys())
+                writer.writerows(zip(*data.values()))
+        self.update_status_bar(
+            "Brightness analysis results succefully exported as csv!")
+
     def onPlotResults(self, event):
         self.plotResults(False)
 
@@ -2469,7 +2511,6 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
                 int_data.append(single_data)
         if not calibrated:
             self.stoich_calibration = np.average(np.array(int_calibration).flatten())
-            print(self.stoich_calibration)
 
         stoichiometry = []
         n_particles = []
@@ -2680,4 +2721,3 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
             stats_grid.AutoSizeColumns()
 
         self.page_stats.Fit()
-        
