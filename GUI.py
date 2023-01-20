@@ -30,6 +30,8 @@ import re
 from natsort import natsorted
 import csv
 
+import pandas as pd
+
 import analysis
 import fitting
 
@@ -100,7 +102,7 @@ class MainFrame(wx.Frame):
         self.stoich_calibration = -1
 
         #data storage in dictionary
-        self.fieldnames = ["experiment","position","time","index","intensity"]
+        self.fieldnames = ["experiment","time","position","index","intensity"]
         #dictionary for characterization of spots
         self.data = {
             self.fieldnames[0] : [],    #experiment
@@ -109,6 +111,14 @@ class MainFrame(wx.Frame):
             self.fieldnames[3] : [],     #index
             self.fieldnames[4] : []     #intensity
             }
+        self.analyzed_data = {
+            "time" : [],    #time
+            "stoichiometry" : [],    #stoichiometry
+            "stoichiometry_err" : [],
+            "nparticles" : [],  #spots
+            "nparticles_err" : []    
+            }
+        self.calibrations = []
 # Pages
 
     def generate_menu_bar(self):
@@ -1557,16 +1567,20 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
 
                 #read in data in dictionary
                 with open(csvfile, newline='') as csv_file:
-                    reader = csv.reader(csv_file, delimiter=' ', quotechar='|')
+                    reader = csv.reader(csv_file, delimiter=',', quotechar='|')
                     for r,row in enumerate(reader):
+                        #calibrations
+                        if r == 1:
+                            print(row)
+                            self.calibrations.append(float(row[0].split(',')[10]))
+                        #intensity data
                         if r > 3:
-                            for i,key in enumerate(self.stch_analysis.fieldnames):
+                            for i,key in enumerate(self.fieldnames):
                                 try:
                                     print(row)
-                                    self.stch_analysis.data[key].append(row[0].split(',')[i])
+                                    self.data[key].append(row[0].split(',')[i])
                                 except IndexError:
                                     continue
-            print(self.stch_analysis.data)
             self.csv_list_spanel_sizer.Layout()
             self.folder_sizer_csvfiles.Layout()
             self.page_analysis.Layout()
@@ -1632,23 +1646,22 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
                     self.update_status_bar('Data folder succefully loaded! Starting analysis ...')
                     self.iterate()
                     self.update_brightness_tab()
-                    int_data = self.plotResults(calibrated)
+                    int_data = self.analyzeResults(calibrated)
                     stoichiometry = []
                     n_particle = []
                     for t,dat in enumerate(int_data):
-                        stoichiometry.append(np.average(np.array(dat))/self.stoich_calibration*32)
+                        stoichiometry.append(np.mean(np.array(dat))/self.stoich_calibration*32)
                         n_particle.append(len(dat))
                         for index,intensity in enumerate(dat):
-                            self.data[self.fieldnames[0]].append(rootdir.split("\\")[-1])
-                            self.data[self.fieldnames[1]].append(pos)
-                            self.data[self.fieldnames[2]].append(t)
-                            self.data[self.fieldnames[3]].append(index)
-                            self.data[self.fieldnames[4]].append(intensity)
+                            self.data[self.fieldnames[0]].append(rootdir.split("\\")[-1].replace(" ", ""))
+                            self.data[self.fieldnames[1]].append(int(pos))
+                            self.data[self.fieldnames[2]].append(int(t))
+                            self.data[self.fieldnames[3]].append(int(index))
+                            self.data[self.fieldnames[4]].append(float(intensity))
                     datas.append(int_data)
                     stoichiometries.append(stoichiometry)
                     n_particles.append(n_particle)
                     calibrated = True
-                    print(self.data)
                 else:
                     self.folder_path.SetValue('')
                     wx.MessageBox('No TIFF images in selected sub-folder',
@@ -1663,6 +1676,14 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
         npart_kinetics = np.array(list(zip(*[(np.mean(i),np.std(i)) for i in npart_reshaped])))
 
         data_reshaped = np.array(list(zip(*datas)))
+
+        self.analyzed_data["time"] = np.arange(0, len(s_kinetics[0])*10, 10)
+        self.analyzed_data["stoichiometry"] = s_kinetics[0]
+        self.analyzed_data["stoichiometry_err"] = s_kinetics[1]
+        self.analyzed_data["nparticles"] = npart_kinetics[0]
+        self.analyzed_data["nparticles_err"] = npart_kinetics[1]
+
+        print(self.analyzed_data)
 
         fig, axis = plt.subplots(2,3)
         axis[0][0].set_ylabel("counts")
@@ -2540,21 +2561,12 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
     # export dictionary as .csv
     def onExportcsv(self, *params):    #params: samples = [], position (1-10)
         self.update_status_bar("Exporting analysis results ...")
-        #str = self.stch_analysis.export_brightness_3()
         dlg = wx.FileDialog(self, "Select a file: ", style=wx.FD_SAVE)
-        # separate into lines:
-        #splitstr = str.split("\n")[3].split(",")[0:-2]
         if dlg.ShowModal() == wx.ID_OK:
-            # for rep,replicate in enumerate(self.stch_analysis.replicates):
-            #     for index in range(len(replicate.particles)-1):
-            #         self.stch_analysis.data[self.stch_analysis.fieldnames[0]].append(dlg.GetPath().split("\\")[-1].split(".")[0])
-            #         self.stch_analysis.data[self.stch_analysis.fieldnames[1]].append(rep)
-            #         self.stch_analysis.data[self.stch_analysis.fieldnames[2]].append(index)
-            #         self.stch_analysis.data[self.stch_analysis.fieldnames[3]].append(float(splitstr[0]))
-            #         splitstr.pop(0)
+            #export raw data
             file = dlg.GetPath()
             with open(file, 'w', newline='') as csvfile:
-                writer = csv.writer(csvfile)
+                writer = csv.writer(csvfile, delimiter = ",")
                 options_keys = [*self.stch_analysis.gui_values.keys(), 'calibration']
                 writer.writerow(options_keys)
                 options_vals = [*self.stch_analysis.gui_values.values(),self.stoich_calibration]
@@ -2562,13 +2574,81 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
                 writer.writerow('') #add empty line
                 writer.writerow(self.data.keys())
                 writer.writerows(zip(*self.data.values()))
+
+            print(self.analyzed_data)
+            print(zip(*self.analyzed_data.values()))
+            #export analyzed data
+            with open(file.split(".")[0] + "_analyzed.csv", 'w', newline='') as csvfile:
+                writer = csv.writer(csvfile, delimiter = ",")
+                writer.writerow(self.analyzed_data.keys())
+                writer.writerows(zip(*self.analyzed_data.values()))
+
         self.update_status_bar(
             "Brightness analysis results succefully exported as csv!")
 
     def onPlotResults(self, event):
-        self.plotResults(False)
+        self.plotResults()
 
-    def plotResults(self, calibrated):
+    def plotResults(self):
+        fig, axis = plt.subplots(2,3)
+        axis[0][0].set_ylabel("counts")
+        axis[0][0].set_xlabel("brightness (mol. units)")
+        axis[0][0].set_ylim(0,500)
+        axis[0][0].set_xlim(0,600)
+
+        axis[0][1].set_ylabel("stoichiometry")
+        axis[0][1].set_xlabel("time after tmre loss (min)")
+        axis[0][1].set_xlim(0,110)
+        axis[0][1].set_ylim(0,200)
+
+        axis[0][2].set_ylabel("# of spots per area")
+        axis[0][2].set_xlabel("time after tmre loss (min)")
+        axis[0][2].set_xlim(0,110)
+        axis[0][2].set_ylim(0,1000)
+
+        axis[1][1].set_ylabel("stoichiometry")
+        axis[1][1].set_xlabel("time after tmre loss (min)")
+        axis[1][1].set_xlim(0,110)
+        axis[1][1].set_ylim(0,200)
+
+        axis[0][0].hist(np.array(self.data['intensity'], dtype = np.float)/self.calibrations[0]*32)
+
+        n_times = int(max(self.data['time']))
+        stoichiometry = np.zeros(n_times+1)
+        print(n_times)
+        #now plot different experiments in different lines
+        #1: find all different experiments in dictionary
+        experiment_names = []
+        for e in self.data['experiment']:
+            if not e in experiment_names:
+                experiment_names.append(e)
+        print(experiment_names)
+        #construct nested list
+        intensity_experiments = []
+        for e in experiment_names:
+            intensity_times = []
+            for t in range(n_times+1):
+                intensity_times.append([])
+            #fill lists with intensity values timewise
+            for i in range(len(self.data['time'])):
+                if self.data["experiment"][i] == e:
+                    intensity_times[int(self.data['time'][i])].append(float(self.data['intensity'][i]))
+            stoichiometry = np.array(list(zip(*[(np.mean(i),np.std(i)) for i in intensity_times])))/self.calibrations[0]*32
+            intensity_experiments.append(intensity_times)
+            axis[0][1].plot(np.arange(0, len(stoichiometry[0])*10, 10), stoichiometry[0])
+            axis[0][1].fill_between(np.arange(0, len(stoichiometry[0])*10, 10), stoichiometry[0] - stoichiometry[1], stoichiometry[0] + stoichiometry[1], alpha=0.2)
+
+        #plot stoichiometry of different experiments
+        for e,experiment in enumerate(intensity_experiments):
+            axis[1][0].hist(np.array(experiment[-1], dtype = np.float)/self.calibrations[e]*32, alpha=0.2)
+            stoichiometry = np.array(list(zip(*[(np.mean(i),np.std(i)) for i in experiment])))/self.calibrations[0]*32
+            axis[1][1].plot(np.arange(0, len(stoichiometry[0])*10, 10), stoichiometry[0], label = experiment_names[e])
+            axis[1][1].fill_between(np.arange(0, len(stoichiometry[0])*10, 10), stoichiometry[0] - stoichiometry[1], stoichiometry[0] + stoichiometry[1], alpha=0.2)
+            print(e)
+        axis[1][1].legend()
+        fig.show()
+
+    def analyzeResults(self, calibrated):
         self.update_status_bar("Showing results ...")
         fig, axis = plt.subplots(1,2)
         axis[0].set_ylabel("counts")
