@@ -116,7 +116,9 @@ class MainFrame(wx.Frame):
             "stoichiometry" : [],    #stoichiometry
             "stoichiometry_err" : [],
             "nparticles" : [],  #spots
-            "nparticles_err" : []    
+            "nparticles_err" : [],
+            "stoich_x_npart" : [],
+            "stoich_x_npart_err" : []
             }
         self.calibrations = []
 # Pages
@@ -317,11 +319,11 @@ class MainFrame(wx.Frame):
         defaults = [('photon_coef', self.photon_coef, 12.5),
                     ('frame_rate', self.frame_rate, 60),
                     ('pixel_size', self.pixel_size, 100),
-                    ('def_roi_radius', self.roi_radius, 5),
+                    ('def_roi_radius', self.roi_radius, 6),
                     ('def_min_sigma', self.default_min_sigma, 2.0),
                     ('def_max_sigma', self.default_max_sigma, 3.0),
-                    ('def_threshold', self.default_threshold, 0.000025),
-                    ('def_iterations', self.iterations, 4),
+                    ('def_threshold', self.default_threshold, 0.00002),
+                    ('def_iterations', self.iterations, 8),
                     ('def_median_offset', self.default_offset, 3),
                     ('def_bins', self.default_bins, 10)]
 
@@ -497,7 +499,7 @@ class MainFrame(wx.Frame):
         discard_grid_sizer.Add(wx.StaticText(
             self.page_detection, label="Threshold: "), 0, wx.ALIGN_CENTER_VERTICAL)
         self.width_threshold = wx.TextCtrl(
-            self.page_detection, size=((80, -1)), value='0.95')
+            self.page_detection, size=((80, -1)), value='0.9')
         discard_grid_sizer.Add(self.width_threshold, 1)
         self.discard_preview = wx.CheckBox(
             self.page_detection, label='Preview')
@@ -1572,15 +1574,16 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
                         #calibrations
                         if r == 1:
                             print(row)
-                            self.calibrations.append(float(row[0].split(',')[10]))
+                            self.calibrations.append(float(row[10]))
                         #intensity data
                         if r > 3:
                             for i,key in enumerate(self.fieldnames):
                                 try:
                                     print(row)
-                                    self.data[key].append(row[0].split(',')[i])
+                                    self.data[key].append(row[i])
                                 except IndexError:
-                                    continue
+                                    print("Index Error")
+                print(self.data['time'])
             self.csv_list_spanel_sizer.Layout()
             self.folder_sizer_csvfiles.Layout()
             self.page_analysis.Layout()
@@ -1682,6 +1685,8 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
         self.analyzed_data["stoichiometry_err"] = s_kinetics[1]
         self.analyzed_data["nparticles"] = npart_kinetics[0]
         self.analyzed_data["nparticles_err"] = npart_kinetics[1]
+        self.analyzed_data["stoich_x_npart"] = list(np.array(s_kinetics[0])*np.array(npart_kinetics[0]))
+        self.analyzed_data["stoich_x_npart_err"] = list(np.array(s_kinetics[0])*np.array(npart_kinetics[1])+np.array(s_kinetics[1])*np.array(npart_kinetics[0]))
 
         print(self.analyzed_data)
 
@@ -1707,7 +1712,10 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
         #first find maximum
         max_value = max(s_kinetics[0])
         #find index of maximum (if there are multiple take the first one)
-        max_index = int([index for index, item in enumerate(s_kinetics[0]) if item == max_value][0])
+        try:
+            max_index = int([index for index, item in enumerate(s_kinetics[0]) if item == max_value][0])
+        except IndexError:
+            max_index = 4
         print("maximum oligomerization after " + str(max_index*10) + " minutes")
         data_cumulative = []
         for i,p_int in enumerate(datas):
@@ -2049,7 +2057,6 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
                     self.current_sequence.localize_particles(frame, fit_method)
                     self.show_check_box.SetValue(True)
                     self.update_image_tab()
-
                     #self.update_status_bar('Discarding particles ...')
                     # elf.current_sequence.discard_close_particles()
                     # self.show_check_box.SetValue(True)
@@ -2058,12 +2065,11 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
                     
                     self.update_status_bar('Discarding particles (Threshold)...')
                     threshold = float(self.width_threshold.GetValue())
-                    self.current_sequence.discard_wide_particles(threshold)
+                    self.current_sequence.discard_wide_particles(threshold) #error for no particles detected
                     self.discard_preview.SetValue(False)
                     self.show_check_box.SetValue(True)
                     self.update_image_tab()
                     self.update_status_bar("Discarding is done")
-
                     self.update_status_bar('Discarding particles (Stack)...')
                     # Gathering the values for all particles
                     to_remove = []
@@ -2564,7 +2570,7 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
         dlg = wx.FileDialog(self, "Select a file: ", style=wx.FD_SAVE)
         if dlg.ShowModal() == wx.ID_OK:
             #export raw data
-            file = dlg.GetPath()
+            file = dlg.GetPath().split('.')[0] + '.csv'
             with open(file, 'w', newline='') as csvfile:
                 writer = csv.writer(csvfile, delimiter = ",")
                 options_keys = [*self.stch_analysis.gui_values.keys(), 'calibration']
@@ -2612,7 +2618,7 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
         axis[1][1].set_ylim(0,200)
 
         axis[0][0].hist(np.array(self.data['intensity'], dtype = np.float)/self.calibrations[0]*32)
-
+        print(self.data['time'])
         n_times = int(max(self.data['time']))
         stoichiometry = np.zeros(n_times+1)
         print(n_times)
@@ -2636,7 +2642,7 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
             stoichiometry = np.array(list(zip(*[(np.mean(i),np.std(i)) for i in intensity_times])))/self.calibrations[0]*32
             intensity_experiments.append(intensity_times)
             axis[0][1].plot(np.arange(0, len(stoichiometry[0])*10, 10), stoichiometry[0])
-            axis[0][1].fill_between(np.arange(0, len(stoichiometry[0])*10, 10), stoichiometry[0] - stoichiometry[1], stoichiometry[0] + stoichiometry[1], alpha=0.2)
+            #axis[0][1].fill_between(np.arange(0, len(stoichiometry[0])*10, 10), stoichiometry[0] - stoichiometry[1], stoichiometry[0] + stoichiometry[1], alpha=0.2)
 
         #plot stoichiometry of different experiments
         for e,experiment in enumerate(intensity_experiments):
@@ -2653,8 +2659,8 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
         fig, axis = plt.subplots(1,2)
         axis[0].set_ylabel("counts")
         axis[0].set_xlabel("brightness")
-        #get data from string to float
 
+        #get data from string to float
         str = self.stch_analysis.export_brightness_3()
         splitstr = str.split("\n")[3].split(",")[0:-2]
 
@@ -2670,14 +2676,17 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
                 else:
                     single_data.append(float(splitstr[0]))
                     splitstr.pop(0)
-            if not replicate.summary['calibration']:
+            if not replicate.summary['calibration'] and len(single_data) > 0:
                 int_data.append(single_data)
+            elif not replicate.summary['calibration'] and len(single_data) == 0:
+                int_data.append([0])
         if not calibrated:
             self.stoich_calibration = np.average(np.array(int_calibration).flatten())
 
         stoichiometry = []
         n_particles = []
         for dat in int_data:
+            print(dat)
             stoichiometry.append(np.average(np.array(dat))/self.stoich_calibration*32)
             n_particles.append(len(dat))
             axis[0].hist(np.array(dat)/self.stoich_calibration*32, alpha = 0.6)
