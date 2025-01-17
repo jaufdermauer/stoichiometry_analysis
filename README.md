@@ -33,3 +33,6 @@ If single replicates should be analyzed:
 3. Select a folder for the data (eg. test_dataset/data/1).
 4. Go to the Particle Detection tab (sometimes you have to go twice back and forth) and there you can press detect, then localize and then several constraints can be applied on the particles like distance, threshold and stacking.
 5. Go to Brightness tab and there you can either export first frame intensities, monomer intensities or first frame intensities in separate lines (they are the raw uncalibrated brightness, that divided by the calibration eg. nup96 intensity, yields the stoichiometry via the ratiometric approach.
+
+
+This project is licensed under the MIT License (see license.txt).
