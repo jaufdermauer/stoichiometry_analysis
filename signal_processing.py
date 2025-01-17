@@ -1,6 +1,9 @@
 import numpy as np
 from skimage import io, draw, img_as_float
 import fitting
+from scipy import signal, linalg
+import glob, ast
+
 
 class GSignal:
     def __init__(self, parent):
@@ -92,7 +95,7 @@ class GSignal:
         :param values:
         :return:
         """
-        self.kde_xs, self.kde_ys = get_kde_values(self.base_values)
+        self.kde_xs, self.kde_ys = fitting.get_kde_values(self.base_values)
         kde_xs_peaks = signal.argrelmax(self.kde_ys, mode='wrap')[0]
         self.kde_peak_values = [self.kde_xs[i] for i in kde_xs_peaks]
         self.kde_values = SteppedSignal.get_by_step_values(self.base_values, self.kde_peak_values)

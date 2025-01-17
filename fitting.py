@@ -1,5 +1,6 @@
 from scipy.stats import gaussian_kde, binom
 import numpy as np
+from scipy.optimize import curve_fit, minimize
 
 class BGMatrixQuadrant:
     def __init__(self, r1, r2, c1, c2):

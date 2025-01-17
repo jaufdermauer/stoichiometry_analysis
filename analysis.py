@@ -165,13 +165,13 @@ class StchAnalysis:
                                                  normed=True)
                 self.ba_all_intensities_xs = [np.average(bin_edges[i:i+2]) for i, edge in enumerate(bin_edges) if i < len(bin_edges)-1]
             else:
-                self.mono_model = get_pdf_model(self.ba_monomers_intensities)
+                self.mono_model = fitting.get_pdf_model(self.ba_monomers_intensities)
                 self.ba_monomer_intensity = self.mono_model['mean']
-                self.all_models = get_pdf_models(self.mono_model)
+                self.all_models = fitting.get_pdf_models(self.mono_model)
                 self.ba_all_intensities_xs, self.ba_all_intensities_ys = fitting.get_kde_values(self.ba_all_intensities,
                                                                                         num_peaks=len(self.all_models))
 
-            self.multiple_fitting_res = get_multiple_fitting(self.ba_all_intensities_xs,
+            self.multiple_fitting_res = fitting.get_multiple_fitting(self.ba_all_intensities_xs,
                                                              self.ba_all_intensities_ys,
                                                              self.all_models, label_efficiency)
             self.ba_distribution = []

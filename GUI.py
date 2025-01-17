@@ -959,7 +959,7 @@ class MainFrame(wx.Frame):
                         self.default_offset.GetValue())),
                     ('filter', self.median_filter, False),
                     ('kde', self.kde, False),
-                    ('kde_fix', self.kde_fix, False),
+                    ('kde_fix', self.kde_fix, True),
                     ('bins', self.bins, int(self.default_bins.GetValue())),
                     ('hist', self.hist, False),
                     ('hist_fix', self.hist_fix, False),
@@ -1163,13 +1163,17 @@ class MainFrame(wx.Frame):
             self.ba_widgets.append(gwidget)
 
     def generate_stats_page(self):
+        # Create a new panel for the "Stats" tab
         self.page_stats = wx.Panel(self.nb)
         self.nb.AddPage(self.page_stats, "Stats")
         self.tab_stats_main_box = wx.BoxSizer(wx.HORIZONTAL)
         self.stats_panel = wx.Panel(self.page_stats)
         self.stats_panel_sizer = wx.BoxSizer(wx.VERTICAL)
-        self.stats_panel_sizer.Add(self.stats_panel, 1, wx.EXPAND)
-        self.tab_stats_main_box.Add(self.stats_panel_sizer, 1, wx.EXPAND)
+        example_widget = wx.StaticText(self.stats_panel, label="Example Stat")
+        self.stats_panel_sizer.Add(example_widget, 0, wx.ALL, 5)
+        self.stats_panel.SetSizer(self.stats_panel_sizer)
+        self.tab_stats_main_box.Add(self.stats_panel, 1, wx.EXPAND)
+    
         self.page_stats.SetSizer(self.tab_stats_main_box)
 
     def generate_analysis_page(self):
@@ -1474,6 +1478,13 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
         elif event.GetSelection() == 2:
             self.update_particle_tab()
             self.update_status_bar("")
+            for p in self.current_sequence.particles:
+                print(p)
+                self.current_particle = p
+                bg_method = self.methods_val[self.bg_method.GetValue()]
+                gsignal = self.current_particle.signals[bg_method]
+                gsignal.generate_signals()
+                self.update_particle_tab(update_all = False)
 
         elif event.GetSelection() == 3:
             self.update_photobleaching_tab()
@@ -2049,46 +2060,48 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
             #self.update_status_bar("Background ROIs generated!")
             
             for itnum in range(int(self.iterations.GetValue())):
+                
+                print(itnum)
+                self.update_status_bar('Iterating ...')
+                frame = int(self.frame.GetValue())
+                fit_method = self.fit_method.GetValue()
+                self.current_sequence.localize_particles(frame, fit_method)
+                self.show_check_box.SetValue(True)
+                self.update_image_tab()
+                #self.update_status_bar('Discarding particles ...')
+                # elf.current_sequence.discard_close_particles()
+                # self.show_check_box.SetValue(True)
+                # self.update_image_tab()
+                #self.update_status_bar("Discarding is done")
+                
+                self.update_status_bar('Discarding particles (Threshold)...')
+                threshold = float(self.width_threshold.GetValue())
                 try:
-                    print(itnum)
-                    self.update_status_bar('Iterating ...')
-                    frame = int(self.frame.GetValue())
-                    fit_method = self.fit_method.GetValue()
-                    self.current_sequence.localize_particles(frame, fit_method)
-                    self.show_check_box.SetValue(True)
-                    self.update_image_tab()
-                    #self.update_status_bar('Discarding particles ...')
-                    # elf.current_sequence.discard_close_particles()
-                    # self.show_check_box.SetValue(True)
-                    # self.update_image_tab()
-                    #self.update_status_bar("Discarding is done")
-                    
-                    self.update_status_bar('Discarding particles (Threshold)...')
-                    threshold = float(self.width_threshold.GetValue())
                     self.current_sequence.discard_wide_particles(threshold) #error for no particles detected
-                    self.discard_preview.SetValue(False)
-                    self.show_check_box.SetValue(True)
-                    self.update_image_tab()
-                    self.update_status_bar("Discarding is done")
-                    self.update_status_bar('Discarding particles (Stack)...')
-                    # Gathering the values for all particles
-                    to_remove = []
-                    for i, particle in enumerate(self.current_sequence.particles):
-                        #print("particle %i" %i)
-                        particle.signals['sum'].generate_sequence()
-                        # Removing condition
-                        # Question: what if the maximum is in both, the middle and one of the extremes
-                        # discarding first frame
-                        frame_values = particle.signals['sum'].base_values[1:]
-                        max_value = max(frame_values)
-                        if frame_values[0] == max_value or frame_values[-1] == max_value:
-                            to_remove.append(i)
-                    self.current_sequence.discard_particles(to_remove)
-                    self.update_image_tab()
-                    self.update_status_bar("Discarding is done...")
                 except ValueError:
                     print(str(self.current_sequence.video_name) + " is probably not suitable for analysis because no spots could be detected")
                     continue
+                self.discard_preview.SetValue(False)
+                self.show_check_box.SetValue(True)
+                self.update_image_tab()
+                self.update_status_bar("Discarding is done")
+                self.update_status_bar('Discarding particles (Stack)...')
+                # Gathering the values for all particles
+                to_remove = []
+                for i, particle in enumerate(self.current_sequence.particles):
+                    #print("particle %i" %i)
+                    particle.signals['sum'].generate_sequence()
+                    # Removing condition
+                    # Question: what if the maximum is in both, the middle and one of the extremes
+                    # discarding first frame
+                    frame_values = particle.signals['sum'].base_values[1:]
+                    max_value = max(frame_values)
+                    if frame_values[0] == max_value or frame_values[-1] == max_value:
+                        to_remove.append(i)
+                self.current_sequence.discard_particles(to_remove)
+                self.update_image_tab()
+                self.update_status_bar("Discarding is done...")
+                
 
             self.update_status_bar("Iteration is done!")
 
@@ -2201,7 +2214,7 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
         ba_method = self.methods_val[self.ba_brightness_method.GetValue()]
         if self.current_particle:
             self.current_particle.signals[ba_method].generate_sequence()
-            bins = get_bins_number(
+            bins = fitting.get_bins_number(
                 self.current_particle.signals[ba_method].base_values)
             bin_widget = self.widgets[self.bins.GetId()]
             bin_widget.setValue(bins)
@@ -2219,13 +2232,15 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
                 # Todo: show a message
                 pass
 
-    def update_particle_tab(self, trigger=None):
+    def update_particle_tab(self, trigger=None, update_all = True):
         if self.current_sequence and self.current_sequence.particles:
             if not self.current_particle:
                 self.current_particle = self.current_sequence.particles[0]
-            self.update_particle_widgets()
-            self.update_particle_image(trigger=trigger)
             self.update_particle_values()
+            self.update_particle_widgets()
+            if update_all:
+                print("update all")
+                self.update_particle_image(trigger=trigger)
 
     def update_particle_widgets(self):
         self.particle_id.SetRange(0, len(self.current_sequence.particles)-1)
@@ -2618,10 +2633,10 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
         axis[1][1].set_ylim(0,200)
 
         axis[0][0].hist(np.array(self.data['intensity'], dtype = np.float)/self.calibrations[0]*32)
-        print(self.data['time'])
+        #print(self.data['time'])
         n_times = int(max(self.data['time']))
         stoichiometry = np.zeros(n_times+1)
-        print(n_times)
+        #print(n_times)
         #now plot different experiments in different lines
         #1: find all different experiments in dictionary
         experiment_names = []
@@ -2686,7 +2701,7 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
         stoichiometry = []
         n_particles = []
         for dat in int_data:
-            print(dat)
+            #print(dat)
             stoichiometry.append(np.average(np.array(dat))/self.stoich_calibration*32)
             n_particles.append(len(dat))
             axis[0].hist(np.array(dat)/self.stoich_calibration*32, alpha = 0.6)
@@ -2783,7 +2798,7 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
                          mono_model['hist_values'],
                          bar_width, alpha=0.3, color='b')
                 axes.locator_params(nbins=4)
-                mono_ys = gaussian(
+                mono_ys = fitting.gaussian(
                     mono_xs, mono_model['mean'], mono_model['sdev'], mono_model['gauss_a'])
             else:
                 mono_ys = mono_model['pdf_function'](mono_xs)
@@ -2823,73 +2838,72 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
 # Tab Stats methods
 
     def update_stats_tab(self):
-        """
-        Display summary and stats by file
-        :return:
-        """
-        # Emptying the sizer
-        for cb in self.stats_panel_sizer.GetChildren():
-            self.stats_panel_sizer.Hide(cb.Window)
-            #self.stats_panel.RemoveChild(cb.Window)
+        # Clear existing widgets from the sizer and destroy them
+        for child in self.stats_panel_sizer.GetChildren():
+            widget = child.Window
+            self.stats_panel_sizer.Detach(widget)
+            widget.Destroy()
 
+        # Create the initial stats grid with the correct parent
+        stats_grid = wx.grid.Grid(self.stats_panel)
+        stats_grid.CreateGrid(10, 11)  # Create with the default size, will adjust rows later
+
+        # Add the grid to the sizer
+        self.stats_panel_sizer.Add(stats_grid, 1, wx.EXPAND)
+
+        # Verify the parent of the grid
+        if stats_grid.GetParent() != self.stats_panel:
+            raise ValueError(f"Incorrect parent assigned to stats_grid: {stats_grid.GetParent()}")
+
+        # Set column labels
+        col_labels = [
+            "File", "Calib.", "Parts", "Mono.", "Higher", "Global\nbckg", 
+            "Local\nbckg", "Global\naccuracy", "Local\naccuracy", "Width\navg.", "Width\nstd."
+        ]
+        for col_index, label in enumerate(col_labels):
+            stats_grid.SetColLabelValue(col_index, label)
+
+        # Disable editing
+        stats_grid.EnableEditing(False)
+
+        # If self.stch_analysis is True, adjust the grid size and fill data
         if self.stch_analysis:
-            stats_grid = wx.grid.Grid(self.page_stats)
-            self.stats_panel_sizer.Add(stats_grid, 1, wx.EXPAND)
             rows = len(self.stch_analysis.replicates)
-            stats_grid.CreateGrid(rows, 11)
-            stats_grid.SetColLabelValue(0, "File")
-            stats_grid.SetColLabelValue(1, "Calib.")
-            stats_grid.SetColLabelValue(2, "Parts")
-            stats_grid.SetColLabelValue(3, "Mono.")
-            stats_grid.SetColLabelValue(4, "Higher")
-            stats_grid.SetColLabelValue(5, "Global\nbckg")
-            stats_grid.SetColLabelValue(6, "Local\nbckg")
-            stats_grid.SetColLabelValue(7, "Global\naccuracy")
-            stats_grid.SetColLabelValue(8, "Local\naccuracy")
-            stats_grid.SetColLabelValue(9, "Width\navg.")
-            stats_grid.SetColLabelValue(10, "Width\nstd.")
+            stats_grid.AppendRows(rows)  # Append rows instead of calling CreateGrid again
 
-            stats_grid.EnableEditing(False)
-
-            # Filling the grid
-            for i in range(rows):
+            # Filling the grid with data
+            for i, replicate in enumerate(self.stch_analysis.replicates):
                 values = {}
-                replicate = self.stch_analysis.replicates[i]
                 values[0] = basename(replicate.video_name)
                 values[1] = replicate.summary['calibration']
                 values[2] = len(replicate.particles)
-                values[5] = "{:.2f}".format(
-                    replicate.summary['global_bckg_avg'])
-                values[6] = "{:.2f}".format(
-                    replicate.summary['local_bckg_avg'])
-                values[7] = "{:.2f}".format(
-                    replicate.summary['accuracy_global'])
-                values[8] = "{:.2f}".format(
-                    replicate.summary['accuracy_local'])
-                values[9] = "{:.2f}".format(
-                    replicate.summary['fitted_width_avg'])
-                values[10] = "{:.2f}".format(
-                    replicate.summary['fitted_width_std'])
+                values[5] = "{:.2f}".format(replicate.summary['global_bckg_avg'])
+                values[6] = "{:.2f}".format(replicate.summary['local_bckg_avg'])
+                values[7] = "{:.2f}".format(replicate.summary['accuracy_global'])
+                values[8] = "{:.2f}".format(replicate.summary['accuracy_local'])
+                values[9] = "{:.2f}".format(replicate.summary['fitted_width_avg'])
+                values[10] = "{:.2f}".format(replicate.summary['fitted_width_std'])
 
                 values[3] = 0
                 values[4] = 0
-                ba_method = self.methods_val[self.ba_brightness_method.GetValue(
-                )]
+                ba_method = self.methods_val[self.ba_brightness_method.GetValue()]
                 for p in replicate.particles:
-                    if p.signals[ba_method].steps_count == 1:  # Is only None when is created
+                    if p.signals[ba_method].steps_count == 1:
                         values[3] += 1
                     if p.signals[ba_method].steps_count > 1:
                         values[4] += 1
 
                 for k, v in values.items():
                     stats_grid.SetCellValue(i, k, str(v))
+                    # Set background color based on conditions
                     if values[1]:
-                        stats_grid.SetCellBackgroundColour(
-                            i, k, wx.Colour(245, 245, 255))
+                        stats_grid.SetCellBackgroundColour(i, k, wx.Colour(245, 245, 255))
                     if values[2] == 0:
-                        stats_grid.SetCellBackgroundColour(
-                            i, k, wx.Colour(255, 245, 245))
+                        stats_grid.SetCellBackgroundColour(i, k, wx.Colour(255, 245, 245))
 
-            stats_grid.AutoSizeColumns()
+        stats_grid.AutoSizeColumns()  # Automatically adjust the column widths
 
+        # Refresh the layout
+        self.stats_panel.Layout()
+        self.page_stats.Layout()
         self.page_stats.Fit()
