@@ -142,6 +142,7 @@ class StchAnalysis:
                                 accuracies.append(particle.localization['accuracy_local'])
                             elif background_method == 'global':
                                 accuracies.append(particle.localization['accuracy_global'])
+        print(np.array(brightness), widths, accuracies)
         return np.array(brightness), widths, accuracies
 
     def brightness_analysis(self, brightness_method, background_method, fitting_method, label_efficiency):
@@ -161,17 +162,16 @@ class StchAnalysis:
                 self.ba_monomer_intensity = self.mono_model['mean']
                 self.all_models = fitting.get_gaussian_models(self.mono_model)
                 self.ba_all_intensities_ys, bin_edges = np.histogram(self.ba_all_intensities,
-                                                 bins=fitting.get_bins_number(self.ba_all_intensities),
-                                                 normed=True)
+                                                 bins=fitting.get_bins_number(self.ba_all_intensities))
                 self.ba_all_intensities_xs = [np.average(bin_edges[i:i+2]) for i, edge in enumerate(bin_edges) if i < len(bin_edges)-1]
             else:
-                self.mono_model = get_pdf_model(self.ba_monomers_intensities)
+                self.mono_model = fitting.get_pdf_model(self.ba_monomers_intensities)
                 self.ba_monomer_intensity = self.mono_model['mean']
-                self.all_models = get_pdf_models(self.mono_model)
+                self.all_models = fitting.get_pdf_models(self.mono_model)
                 self.ba_all_intensities_xs, self.ba_all_intensities_ys = fitting.get_kde_values(self.ba_all_intensities,
                                                                                         num_peaks=len(self.all_models))
 
-            self.multiple_fitting_res = get_multiple_fitting(self.ba_all_intensities_xs,
+            self.multiple_fitting_res = fitting.get_multiple_fitting(self.ba_all_intensities_xs,
                                                              self.ba_all_intensities_ys,
                                                              self.all_models, label_efficiency)
             self.ba_distribution = []
@@ -389,7 +389,7 @@ class StchSequence:
         :param threshold:
         :return:
         """
-        image_gray = rgb2gray(img_as_float(self.video[frame]))
+        image_gray = img_as_float(self.video[frame])
 
         seed = np.copy(image_gray)
         seed[0:-1, 0:-1] = image_gray.min()
@@ -561,8 +561,8 @@ class Particle:
         :param frame:
         :return: True if converged, False otherwise
         """
-        roi = rgb2gray(self.parent.video[frame][self.x-self.r:self.x+self.r+1,
-                                                self.y-self.r:self.y+self.r+1])
+        roi = self.parent.video[frame][self.x-self.r:self.x+self.r+1,
+                                                self.y-self.r:self.y+self.r+1]
         X, Y = np.meshgrid(np.arange(self.x-self.r, self.x+self.r+1),
                            np.arange(self.y-self.r, self.y+self.r+1),
                            indexing='ij')
@@ -633,8 +633,8 @@ class Particle:
         if self.localization == {}:
             return None
 
-        roi = rgb2gray(self.parent.video[frame][self.x-self.r:self.x+self.r+1,
-                                                self.y-self.r:self.y+self.r+1])
+        roi = self.parent.video[frame][self.x-self.r:self.x+self.r+1,
+                                                self.y-self.r:self.y+self.r+1]
         X, Y = np.meshgrid(np.arange(self.x-self.r, self.x+self.r+1),
                            np.arange(self.y-self.r, self.y+self.r+1),
                            indexing='ij')
