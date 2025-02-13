@@ -35,6 +35,8 @@ import pandas as pd
 import analysis
 import fitting
 
+
+
 class GWidget:
     def __init__(self, widget, key, default):
         self.widget = widget
@@ -317,13 +319,13 @@ class MainFrame(wx.Frame):
         self.page_settings.SetSizer(page_settings_main_box, wx.EXPAND)
         self.nb.AddPage(self.page_settings, "Project Settings")
 
-        defaults = [('photon_coef', self.photon_coef, 12.5),
+        defaults = [('photon_coef', self.photon_coef, 1),
                     ('frame_rate', self.frame_rate, 60),
                     ('pixel_size', self.pixel_size, 100),
                     ('def_roi_radius', self.roi_radius, 6),
-                    ('def_min_sigma', self.default_min_sigma, 2.0),
-                    ('def_max_sigma', self.default_max_sigma, 3.0),
-                    ('def_threshold', self.default_threshold, 0.0002),
+                    ('def_min_sigma', self.default_min_sigma, 3.0),
+                    ('def_max_sigma', self.default_max_sigma, 5.0),
+                    ('def_threshold', self.default_threshold, 0.0005),
                     ('def_iterations', self.iterations, 2),
                     ('def_median_offset', self.default_offset, 3),
                     ('def_bins', self.default_bins, 10)]
@@ -1480,7 +1482,7 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
             self.update_particle_tab()
             self.update_status_bar("")
             for p in self.current_sequence.particles:
-                print(p)
+                print("Particle with x = ", p.x, ", y = ", p.y, ", r = ", p.r)
                 self.current_particle = p
                 bg_method = self.methods_val[self.bg_method.GetValue()]
                 gsignal = self.current_particle.signals[bg_method]
@@ -1700,7 +1702,7 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
         self.analyzed_data["stoich_x_npart"] = list(np.array(s_kinetics[0])*np.array(npart_kinetics[0]))
         self.analyzed_data["stoich_x_npart_err"] = list(np.array(s_kinetics[0])*np.array(npart_kinetics[1])+np.array(s_kinetics[1])*np.array(npart_kinetics[0]))
 
-        print(self.analyzed_data)
+        #print(self.analyzed_data)
 
         fig, axis = plt.subplots(2,3)
         axis[0][0].set_ylabel("counts")
@@ -1906,6 +1908,7 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
                             self.current_sequence.particles.pop(particle_id)
                             img = self.current_sequence.get_image_with_detected_rois(
                                 frame)
+                            print("1 ",img.shape)
                             self.update_main_image(img)
                             self.current_particle = None
                             self.update_status_bar(
@@ -1914,6 +1917,7 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
                             self.current_sequence.bckg_rois.pop(bckg_idx)
                             img = self.current_sequence.get_image_with_detected_rois(
                                 frame)
+                            print("2 ",img.shape)
                             self.update_main_image(img)
                             self.update_status_bar(" Background ROI removed")
                     if self.add_opt.GetValue():
@@ -1926,6 +1930,7 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
                             if particle_id is not None:
                                 img = self.current_sequence.get_image_with_detected_rois(
                                     frame)
+                                print("3 ",img.shape)
                                 self.current_particle = self.current_sequence.particles[-1]
                                 self.show_check_box.SetValue(True)
                                 self.update_image_values()
@@ -1941,6 +1946,7 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
                                 self.show_check_box.SetValue(True)
                                 img = self.current_sequence.get_image_with_detected_rois(
                                     frame)
+                                print("4 ",img.shape)
                                 self.update_image_values()
                                 self.update_main_image(img)
                                 self.update_status_bar(" Background ROI added")
@@ -2603,8 +2609,8 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
                 writer.writerow(self.data.keys())
                 writer.writerows(zip(*self.data.values()))
 
-            print(self.analyzed_data)
-            print(zip(*self.analyzed_data.values()))
+            #print(self.analyzed_data)
+            #print(zip(*self.analyzed_data.values()))
             #export analyzed data
             with open(file.split(".")[0] + "_analyzed.csv", 'w', newline='') as csvfile:
                 writer = csv.writer(csvfile, delimiter = ",")
@@ -2693,11 +2699,17 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
             single_data = []
             for j in range(len(replicate.particles)-1):
                 if replicate.summary['calibration']:
-                    int_calibration.append(float(splitstr[0]))
-                    splitstr.pop(0)
+                    try:
+                        int_calibration.append(float(splitstr[0]))
+                        splitstr.pop(0)
+                    except IndexError:
+                        print("calibration contains negative values")
                 else:
-                    single_data.append(float(splitstr[0]))
-                    splitstr.pop(0)
+                    try:
+                        single_data.append(float(splitstr[0]))
+                        splitstr.pop(0)
+                    except IndexError:
+                        print("sample contains negative values")
             if not replicate.summary['calibration'] and len(single_data) > 0:
                 int_data.append(single_data)
             elif not replicate.summary['calibration'] and len(single_data) == 0:
@@ -2756,6 +2768,14 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
                                                        self.methods_val[background_method],
                                                        self.methods_val[fitting_method],
                                                        label_efficiency):
+            
+            calibration_intensities = {}
+
+            distribution = {
+                "species" : [],
+                "species_err" : []
+            }
+
             self.ba_monomers_count.SetLabel(
                 str(len(self.stch_analysis.ba_monomers_intensities)))
             self.ba_particles_count.SetLabel(
@@ -2807,26 +2827,51 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
                 axes.locator_params(nbins=4)
                 mono_ys = fitting.gaussian(
                     mono_xs, mono_model['mean'], mono_model['sdev'], mono_model['gauss_a'])
+
+                
+                calibration_intensities["gauss_mean"] = mono_model['mean']
+                calibration_intensities["gauss_std_dev"] = mono_model['sdev']
+                calibration_intensities["gauss_amplitude"] = mono_model['gauss_a']
+
             else:
                 mono_ys = mono_model['pdf_function'](mono_xs)
+
             axes.plot(mono_xs, mono_ys, color='r', alpha=0.5)
             axes.axvline(self.stch_analysis.ba_monomer_intensity,
                          ls=':', color='r')
+            calibration_intensities["photon_counts"] = self.stch_analysis.ba_monomers_intensities.tolist()
+            calibration_intensities["monomer_photon_counts"] = self.stch_analysis.ba_monomer_intensity
 
             axes = figure.add_subplot(224)
             axes.set_title('Distribution')
             axes.set_xlabel('Species')
             axes.set_ylabel('Percentage')
             bar_width = 0.8
-            xs = np.arange(1, len(self.stch_analysis.ba_distribution)+1)
+            xs = np.arange(1, len(self.stch_analysis.ba_distribution) + 1)
             axes.set_xticks(xs)
-            xs = np.arange(1, len(self.stch_analysis.ba_distribution)+1)-0.4
+            xs = np.arange(1, len(self.stch_analysis.ba_distribution)+1)
             axes.bar(xs,
                      self.stch_analysis.ba_distribution, alpha=0.5,
-                     yerr=self.stch_analysis.ba_distribution_errs)
+                     yerr=self.stch_analysis.ba_distribution_errs, align = 'center')
+            
+            distribution["species"] = self.stch_analysis.ba_distribution
+            distribution["species_err"] = self.stch_analysis.ba_distribution_errs
 
             figure.subplots_adjust(left=0.08, right=0.95,
                                    top=0.95, bottom=0.1, hspace=0.3)
+
+            
+            #output dictionary for all plot parameters in Brightness tab
+            output_dict = {
+                "brightness_analysis": self.stch_analysis.ba_all_intensities.tolist(),
+                "calibration_intensities": calibration_intensities,  # Korrekte Syntax
+                "distribution": distribution  # Korrekte Syntax
+            }
+
+
+            with open("plot_data.json", "w") as file:
+                json.dump(output_dict, file, indent=4)  # `indent=4` for nice format
+
 
             toolbar = NavigationToolbar2Wx(canvas)
             toolbar.Realize()

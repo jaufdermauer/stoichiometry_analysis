@@ -134,7 +134,7 @@ class StchAnalysis:
                          (not monomers and replicate.summary['calibration']) or   #include calibration data in brightness analysis for stoichiometry calculation
                             (not monomers and not replicate.summary['calibration'])):  
                 for particle in replicate.particles:
-                    if (monomers and particle.signals[brightness_method].steps_count == 1) or not monomers:
+                    if (monomers and particle.signals[brightness_method].steps_count == 1) or not monomers and particle.signals[brightness_method].get_frame0_calibrated_brightness(background_method) > 0:
                         brightness.append(particle.signals[brightness_method].get_frame0_calibrated_brightness(background_method))
                         if particle.localization != {}:
                             widths.append(particle.localization['d'])
@@ -142,7 +142,7 @@ class StchAnalysis:
                                 accuracies.append(particle.localization['accuracy_local'])
                             elif background_method == 'global':
                                 accuracies.append(particle.localization['accuracy_global'])
-        print(np.array(brightness), widths, accuracies)
+        #print(np.array(brightness), widths, accuracies)
         return np.array(brightness), widths, accuracies
 
     def brightness_analysis(self, brightness_method, background_method, fitting_method, label_efficiency):
@@ -155,6 +155,9 @@ class StchAnalysis:
         self.ba_monomers_intensities = mono_brightnesses*self.gui_values['photon_coef']
         all_brighnesses, all_widths, all_accuracies = self.get_frame0_values(brightness_method, background_method)
         self.ba_all_intensities = all_brighnesses*self.gui_values['photon_coef']
+        #self.ba_all_intensities = self.ba_all_intensities[self.ba_all_intensities > 0] #discard negative photon count particles
+        #print("ba all intensities", self.ba_all_intensities)
+
         if self.ba_monomers_intensities.any() and self.ba_all_intensities.any():
             self.accuracy_avg = np.mean(all_accuracies)
             if fitting_method == 'gaussfit':
@@ -162,7 +165,7 @@ class StchAnalysis:
                 self.ba_monomer_intensity = self.mono_model['mean']
                 self.all_models = fitting.get_gaussian_models(self.mono_model)
                 self.ba_all_intensities_ys, bin_edges = np.histogram(self.ba_all_intensities,
-                                                 bins=fitting.get_bins_number(self.ba_all_intensities))
+                                                 bins=fitting.get_bins_number(self.ba_all_intensities), density = True)
                 self.ba_all_intensities_xs = [np.average(bin_edges[i:i+2]) for i, edge in enumerate(bin_edges) if i < len(bin_edges)-1]
             else:
                 self.mono_model = fitting.get_pdf_model(self.ba_monomers_intensities)

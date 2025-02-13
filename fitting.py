@@ -1,6 +1,8 @@
 from scipy.stats import gaussian_kde, binom
 import numpy as np
 from scipy.optimize import curve_fit, minimize
+from scipy.interpolate import interp1d
+
 
 class BGMatrixQuadrant:
     def __init__(self, r1, r2, c1, c2):
@@ -86,7 +88,7 @@ def get_kde_values(values, num_samples=100, num_peaks=1):
     kde = gaussian_kde(values, 'silverman')
     ini = np.min(values)
     end = np.max(values)
-    xs = np.linspace(ini, end, num_samples)
+    xs = np.linspace(int(ini), int(end), int(num_samples))
     return xs, kde.pdf(xs)
 
 def get_peak_by_kde(values, num_samples=100, num_peaks=1):
@@ -283,7 +285,7 @@ def get_pdf_model(values):
     kde_mono = gaussian_kde(values)
     ini = 0
     end = np.max(values)
-    xs_pdf_mono = np.linspace(ini, end, end+1)
+    xs_pdf_mono = np.linspace(int(ini), int(end), int(end)+1)
     ys_pdf_mono = kde_mono.pdf(xs_pdf_mono)
 
     return {'pdf_function': kde_mono,
@@ -296,7 +298,7 @@ def get_pdf_models(mono_model):
     N_max = int(np.power(mono_model['mean']/mono_model['sdev'], 2))
     models = []
     ini, end = mono_model['interval']
-    xs = np.linspace(ini, end, end+1)
+    xs = np.linspace(int(ini), int(end), int(end)+1)
     model = {'func': mono_model['pdf_function'].pdf,
              'values': mono_model['pdf_function'].pdf(xs),
              'mean': mono_model['mean'],

@@ -164,6 +164,7 @@ class SumSignal(GSignal):
 
     def get_raw_brightness(self, frame):
         rr, cc = draw.disk((self.parent.x, self.parent.y), self.parent.r)
+        #print("video ",self.parent.parent.video[frame][rr, cc])
         return sum(self.parent.parent.video[frame][rr, cc])
 
     def get_local_bckg(self, frame):
@@ -191,6 +192,7 @@ class SumSignal(GSignal):
         try:
             bckg_avg = fitting.get_peak_by_kde(np.array(intensities))[0][0]
             bckg = bckg_avg*len(rr1)
+            #print("background: ", bckg_avg, bckg)
             return bckg_avg, bckg
         except np.linalg.LinAlgError:
             print("background could not be estimated")
