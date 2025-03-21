@@ -3,6 +3,7 @@ from skimage import io, draw, img_as_float
 import fitting
 from scipy import signal, linalg
 import glob, ast
+from scipy.optimize import curve_fit, minimize
 
 
 class GSignal:
@@ -65,9 +66,14 @@ class GSignal:
         if self.parent.gui_values['kde']:
             self.kde()
         if self.parent.gui_values['kde_fix']:
+            
+            #print("raw values: ", self.raw_values)
+            print("base values 1:", self.base_values)
             self.kde_fix()
         if self.parent.gui_values['manual_split']:
             self.manual(self.parent.gui_values['split_points'])
+        
+        print("signals generated successfully")
 
         # Deciding which is final
         stepped_signals = [self.hist_values,
@@ -84,6 +90,51 @@ class GSignal:
 
     def generate_sequence(self):
         self.reset()
+        intensities = []
+        x, y, r = self.parent.x, self.parent.y, self.parent.r
+        X, Y = np.meshgrid(np.arange(x-r, x+r+1),
+                            np.arange(y-r, y+r+1),
+                            indexing='ij')
+        for i,frame in enumerate(self.parent.parent.video):
+            print(len(self.parent.parent.video))
+            roi = frame[X, Y]
+            flat_X = X.flatten()
+            flat_Y = Y.flatten()
+            flat_roi = roi.flatten()
+
+            Xout, Yout = fitting.get_outer_grid(x, y, r, 2)
+
+            frame_out = frame[Xout, Yout]
+            b = np.sqrt(np.mean(frame_out))
+            b_std = np.std(frame_out)
+            N = abs(np.sum(flat_roi) - len(flat_roi)*np.mean(frame_out))
+            a = self.parent.parent.parent.gui_values['pixel_size']
+            init_values = [x, y, a*r]
+
+            def ls_function(xy, xc, yc, d):
+                return fitting.brightness_function(xy[0], xy[1], xc, yc, d, N, a, b)
+            try:
+                xy = [flat_X, flat_Y]
+                try:
+                    popt, pcov = curve_fit(ls_function,
+                                        xy,
+                                        flat_roi,
+                                        p0=init_values,
+                                        bounds=[[x-r, y-r, 0],
+                                                [x+r, y+r, a*r**2]])
+
+                    intensities.append(int(sum(ls_function(xy, *popt))))
+
+                    if i == 0:
+                        self.frame0_raw_brightness = int(sum(ls_function(xy, *popt)))
+
+                except ValueError:
+                    print("intensity could not be estimated, fit failed")
+            except RuntimeError:
+                print("intensity could not be estimated, fit failed")
+
+        self.raw_values = np.array(intensities)
+        self.base_values = self.raw_values
 
     def filter(self, offset):
         self.filtered_values = np.array([np.median(self.raw_values[max(0, k - offset):min(len(self.raw_values), k + offset + 1)]) for k in range(len(self.raw_values))])
@@ -95,6 +146,7 @@ class GSignal:
         :param values:
         :return:
         """
+        print("base values2: ", self.base_values)
         self.kde_xs, self.kde_ys = fitting.get_kde_values(self.base_values)
         kde_xs_peaks = signal.argrelmax(self.kde_ys, mode='wrap')[0]
         self.kde_peak_values = [self.kde_xs[i] for i in kde_xs_peaks]
@@ -143,7 +195,12 @@ class GSignal:
         self.manual_steps, self.manual_heights = SteppedSignal.classify(self.manual_values)
 
     def get_frame0_calibrated_brightness(self, bckg_method):
-        pass
+        if bckg_method == 'local':
+            bckg = self.frame0_local_bckg
+        elif bckg_method == 'global':
+            rr, cc = draw.disk((self.parent.x, self.parent.y), self.parent.r)
+            bckg = self.parent.parent.summary['global_bckg_avg']*(len(rr))
+        return self.frame0_raw_brightness - bckg
 
 
 class SumSignal(GSignal):
@@ -158,6 +215,7 @@ class SumSignal(GSignal):
         intensities = []
         rr, cc = draw.disk((self.parent.x, self.parent.y), self.parent.r)
         for frame in self.parent.parent.video:
+            print(len(self.parent.parent.video))
             intensities.append(sum(frame[rr, cc]))
         self.raw_values = np.array(intensities)
         self.base_values = self.raw_values

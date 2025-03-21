@@ -818,6 +818,8 @@ class MainFrame(wx.Frame):
                                      choices=[self.methods_key['sum'],
                                               self.methods_key['2dgintegral'],
                                               self.methods_key['2dgheight']])
+        #self.bg_method.Bind(wx.EVT_TEXT, self.update_particle_bleaching)
+        self.bg_method.Bind(wx.EVT_COMBOBOX, self.update_particle_bleaching)
         bg_method_grid_sizer.Add(self.bg_method, 0)
         brightness_sizer.Add(bg_method_grid_sizer, 0, wx.EXPAND)
         # self.background = wx.CheckBox(self.page_processing, label='Background')
@@ -956,7 +958,7 @@ class MainFrame(wx.Frame):
 
         self.page_processing.SetSizer(page_part_main_box, wx.EXPAND)
 
-        defaults = [('method', self.bg_method, 'Pxls sum'),
+        defaults = [#('method', self.bg_method, 'Pxls sum'),
                     # ('background', self.background, False),
                     ('median_offset', self.offset, int(
                         self.default_offset.GetValue())),
@@ -1109,7 +1111,7 @@ class MainFrame(wx.Frame):
         opt_grid_sizer.Add(self.ba_efficiency, 0)
         opt_grid_sizer.Add(wx.StaticText(
             self.page_brightness, label="Brightness:"), 0, wx.ALIGN_CENTER_VERTICAL)
-        self.ba_brightness_method = wx.ComboBox(self.page_brightness, value=self.methods_key['sum'],
+        self.ba_brightness_method = wx.ComboBox(self.page_brightness, value=self.methods_key['2dgintegral'],
                                                 choices=[self.methods_key['sum'],
                                                          self.methods_key['2dgintegral'],
                                                          self.methods_key['2dgheight']])
@@ -1152,8 +1154,7 @@ class MainFrame(wx.Frame):
         self.page_brightness.SetSizer(tab_brightness_main_box)
 
         defaults = [('ba_efficiency', self.ba_efficiency, 0.98),
-                    ('ba_method', self.ba_brightness_method,
-                     self.methods_key['sum']),
+                    ('ba_method', self.ba_brightness_method, self.methods_key['sum']),
                     ('ba_bckg_method', self.ba_bckg_method, 'Local'),
                     ('ba_fitting_method', self.ba_fitting_method, 'Multiple Gaussians')]
 
@@ -1465,6 +1466,18 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
 
 # Common events and methods
 
+    #new function to update when tab changed and when combobox changed
+    def update_particle_bleaching(self, event = None):
+        self.update_particle_tab(update_all = False)
+        for p in self.current_sequence.particles:
+                print("Particle with x = ", p.x, ", y = ", p.y, ", r = ", p.r)
+                self.current_particle = p
+                bg_method_value = self.methods_val[self.bg_method.GetValue()]
+                gsignal = self.current_particle.signals[bg_method_value]
+                print(bg_method_value)
+                gsignal.generate_signals()
+                self.update_particle_tab(update_all = False)
+
     def onChangeTab(self, event):
         self.update_status_bar("Switching tab ...")
         if event.GetSelection() == 0:
@@ -1481,13 +1494,7 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
         elif event.GetSelection() == 2:
             self.update_particle_tab()
             self.update_status_bar("")
-            for p in self.current_sequence.particles:
-                print("Particle with x = ", p.x, ", y = ", p.y, ", r = ", p.r)
-                self.current_particle = p
-                bg_method = self.methods_val[self.bg_method.GetValue()]
-                gsignal = self.current_particle.signals[bg_method]
-                gsignal.generate_signals()
-                self.update_particle_tab(update_all = False)
+            self.update_particle_bleaching()
 
         elif event.GetSelection() == 3:
             self.update_photobleaching_tab()
@@ -2100,6 +2107,7 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
                 self.update_status_bar("Discarding is done")
                 self.update_status_bar('Discarding particles (Stack)...')
                 # Gathering the values for all particles
+                
                 to_remove = []
                 for i, particle in enumerate(self.current_sequence.particles):
                     #print("particle %i" %i)
@@ -2112,6 +2120,7 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
                     if frame_values[0] == max_value or frame_values[-1] == max_value:
                         to_remove.append(i)
                 self.current_sequence.discard_particles(to_remove)
+                
                 self.update_image_tab()
                 self.update_status_bar("Discarding is done...")
                 
@@ -2198,8 +2207,7 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
 # Particle events and methods
 
     def onChangeParticle(self, event):
-        self.current_particle = self.current_sequence.particles[self.particle_id.GetValue(
-        )]
+        self.current_particle = self.current_sequence.particles[self.particle_id.GetValue()]
         self.update_particle_tab()
 
     def onDeleteParticle(self, event):
@@ -2869,7 +2877,7 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
             }
 
 
-            with open("plot_data.json", "w") as file:
+            with open("plot_data_" + str(self.methods_val[fitting_method]) + ".json", "w") as file:
                 json.dump(output_dict, file, indent=4)  # `indent=4` for nice format
 
 

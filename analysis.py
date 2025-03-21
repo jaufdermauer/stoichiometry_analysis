@@ -134,6 +134,8 @@ class StchAnalysis:
                          (not monomers and replicate.summary['calibration']) or   #include calibration data in brightness analysis for stoichiometry calculation
                             (not monomers and not replicate.summary['calibration'])):  
                 for particle in replicate.particles:
+                    #print("cal brightness: ", particle.signals[brightness_method].get_frame0_calibrated_brightness(background_method))
+                    
                     if (monomers and particle.signals[brightness_method].steps_count == 1) or not monomers and particle.signals[brightness_method].get_frame0_calibrated_brightness(background_method) > 0:
                         brightness.append(particle.signals[brightness_method].get_frame0_calibrated_brightness(background_method))
                         if particle.localization != {}:
@@ -609,6 +611,7 @@ class Particle:
             except RuntimeError:
                 return False
             opt_xc, opt_yc, opt_d = popt
+            #print("popt", popt)
         else:
             return False
 
@@ -635,7 +638,6 @@ class Particle:
     def get_fitted(self, frame):
         if self.localization == {}:
             return None
-
         roi = self.parent.video[frame][self.x-self.r:self.x+self.r+1,
                                                 self.y-self.r:self.y+self.r+1]
         X, Y = np.meshgrid(np.arange(self.x-self.r, self.x+self.r+1),

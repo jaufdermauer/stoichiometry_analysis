@@ -174,7 +174,7 @@ def brightness_function(x, y, xc, yc, d, N, a, b):
     :param d: standard deviation
     :param N: Photon count of the roi
     :param a: pixel width
-    :param b: b**2 is the bacgroun
+    :param b: b**2 is the background
     :return:
     """
     pi = 1.0/(2*np.pi*(d**2 + a**2/12.0))*np.exp( -1.0*a**2*((x-xc)**2 + (y-yc)**2 )/(2*(d**2 + a**2/12.0)))
