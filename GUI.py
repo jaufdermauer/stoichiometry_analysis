@@ -116,7 +116,9 @@ class MainFrame(wx.Frame):
             "stoichiometry" : [],    #stoichiometry
             "stoichiometry_err" : [],
             "nparticles" : [],  #spots
-            "nparticles_err" : []    
+            "nparticles_err" : [],
+            "stoich_x_npart" : [],
+            "stoich_x_npart_err" : []
             }
         self.calibrations = []
 # Pages
@@ -179,9 +181,9 @@ class MainFrame(wx.Frame):
         left_box.Add(folder_sizer_cal, 0)
         left_box.AddSpacer(10)
 
-        cb_subfolder = wx.CheckBox(self.page_settings, label="Analyze subfolders")
-        cb_subfolder.Bind(wx.EVT_CHECKBOX, self.onCheckbox_lts(), id=cb_subfolder.GetId())
-        cb_subfolder.SetValue(True)
+        self.cb_subfolder = wx.CheckBox(self.page_settings, label="Analyze subfolders")
+        self.cb_subfolder.Bind(wx.EVT_CHECKBOX, self.onCheckbox_lts)
+        self.cb_subfolder.SetValue(False)
 
         self.folder_box = wx.StaticBox(
             self.page_settings, 0, " Project's data folder ")
@@ -189,10 +191,10 @@ class MainFrame(wx.Frame):
         self.folder_path = wx.TextCtrl(self.page_settings, size=(400, -1))
         folder_sizer.Add(self.folder_path, 0)
         dir_btn = wx.Button(self.page_settings, label='Browse')
-        dir_btn.Bind(wx.EVT_BUTTON, lambda event: self.onSelectDataFolder(event, cb_subfolder.GetValue()), id=dir_btn.GetId())
+        dir_btn.Bind(wx.EVT_BUTTON, lambda event: self.onSelectDataFolder(event, self.cb_subfolder.GetValue()), id=dir_btn.GetId())
         folder_sizer.Add(dir_btn, 0, wx.ALIGN_RIGHT)
 
-        folder_sizer.Add(cb_subfolder, 0, wx.ALIGN_LEFT)
+        folder_sizer.Add(self.cb_subfolder, 0, wx.ALIGN_LEFT)
 
         left_box.Add(folder_sizer, 0)
         left_box.AddSpacer(10)
@@ -317,11 +319,11 @@ class MainFrame(wx.Frame):
         defaults = [('photon_coef', self.photon_coef, 12.5),
                     ('frame_rate', self.frame_rate, 60),
                     ('pixel_size', self.pixel_size, 100),
-                    ('def_roi_radius', self.roi_radius, 5),
+                    ('def_roi_radius', self.roi_radius, 6),
                     ('def_min_sigma', self.default_min_sigma, 2.0),
                     ('def_max_sigma', self.default_max_sigma, 3.0),
-                    ('def_threshold', self.default_threshold, 0.000025),
-                    ('def_iterations', self.iterations, 4),
+                    ('def_threshold', self.default_threshold, 0.0001),
+                    ('def_iterations', self.iterations, 8),
                     ('def_median_offset', self.default_offset, 3),
                     ('def_bins', self.default_bins, 10)]
 
@@ -497,7 +499,7 @@ class MainFrame(wx.Frame):
         discard_grid_sizer.Add(wx.StaticText(
             self.page_detection, label="Threshold: "), 0, wx.ALIGN_CENTER_VERTICAL)
         self.width_threshold = wx.TextCtrl(
-            self.page_detection, size=((80, -1)), value='0.95')
+            self.page_detection, size=((80, -1)), value='0.9')
         discard_grid_sizer.Add(self.width_threshold, 1)
         self.discard_preview = wx.CheckBox(
             self.page_detection, label='Preview')
@@ -1572,15 +1574,16 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
                         #calibrations
                         if r == 1:
                             print(row)
-                            self.calibrations.append(float(row[0].split(',')[10]))
+                            self.calibrations.append(float(row[10]))
                         #intensity data
                         if r > 3:
                             for i,key in enumerate(self.fieldnames):
                                 try:
                                     print(row)
-                                    self.data[key].append(row[0].split(',')[i])
+                                    self.data[key].append(row[i])
                                 except IndexError:
-                                    continue
+                                    print("Index Error")
+                print(self.data['time'])
             self.csv_list_spanel_sizer.Layout()
             self.folder_sizer_csvfiles.Layout()
             self.page_analysis.Layout()
@@ -1609,64 +1612,70 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
     #start analysis with paths from data and calibration
     def onStart(self, event):
         rootdir = self.folder_path.GetValue()
-        stoichiometries = []    #kinetics of stoichiometry
-        n_particles = []    #kinetics of number of particles per image (todo: per mitochondrial area)
+        print(rootdir)
+        stoichiometries = []
+        n_particles = []
         datas = []
         calibrated = False
-        for pos,file in enumerate(natsorted(os.listdir(rootdir))):
-            d = os.path.join(rootdir, file)
-            if os.path.isdir(d):
-                print(d)
-                istif = glob.glob(d + '/*.tif')
-                if istif:
-                    self.update_status_bar('Loading data folder ...')
 
-                    analysis_gui_values = {}
-                    for w in self.analysis_widgets:
-                        analysis_gui_values[w.key] = w.getValue()
+        use_subfolders = self.cb_subfolder.GetValue()
 
-                    sequence_gui_values = {}
-                    for w in self.sequence_widgets:
-                        sequence_gui_values[w.key] = w.getValue()
+        if use_subfolders:
+            dirs = [os.path.join(rootdir, f) for f in natsorted(os.listdir(rootdir))
+                    if os.path.isdir(os.path.join(rootdir, f))]
+        else:
+            dirs = [rootdir]
 
-                    particle_gui_values = {}
-                    for w in self.particle_widgets:
-                        particle_gui_values[w.key] = w.getValue()
+        for pos, d in enumerate(dirs):
+            istif = glob.glob(d + '/*.tif')
+            if istif:
+                self.update_status_bar('Loading data folder ...')
 
-                    self.stch_analysis = analysis.StchAnalysis(d, self.folder_path_cal.GetValue(),
-                                                            calibrated,
-                                                            analysis_gui_values,
-                                                            sequence_gui_values,
-                                                            particle_gui_values)
-                    self.current_sequence = self.stch_analysis.get_replicate_by_index(
-                        0)
-                    self.current_particle = None
-                    self.update_project_files()
+                analysis_gui_values = {}
+                for w in self.analysis_widgets:
+                    analysis_gui_values[w.key] = w.getValue()
 
-                    self.update_status_bar('Data folder succefully loaded! Starting analysis ...')
-                    self.iterate()
-                    self.update_brightness_tab()
-                    int_data = self.analyzeResults(calibrated)
-                    stoichiometry = []
-                    n_particle = []
-                    for t,dat in enumerate(int_data):
-                        stoichiometry.append(np.mean(np.array(dat))/self.stoich_calibration*32)
-                        n_particle.append(len(dat))
-                        for index,intensity in enumerate(dat):
-                            self.data[self.fieldnames[0]].append(rootdir.split("\\")[-1].replace(" ", ""))
-                            self.data[self.fieldnames[1]].append(int(pos))
-                            self.data[self.fieldnames[2]].append(int(t))
-                            self.data[self.fieldnames[3]].append(int(index))
-                            self.data[self.fieldnames[4]].append(float(intensity))
-                    datas.append(int_data)
-                    stoichiometries.append(stoichiometry)
-                    n_particles.append(n_particle)
-                    calibrated = True
-                else:
-                    self.folder_path.SetValue('')
-                    wx.MessageBox('No TIFF images in selected sub-folder',
-                                'Info', wx.OK | wx.ICON_ERROR)
-                    self.update_status_bar('')
+                sequence_gui_values = {}
+                for w in self.sequence_widgets:
+                    sequence_gui_values[w.key] = w.getValue()
+
+                particle_gui_values = {}
+                for w in self.particle_widgets:
+                    particle_gui_values[w.key] = w.getValue()
+
+                self.stch_analysis = analysis.StchAnalysis(d, self.folder_path_cal.GetValue(),
+                                                        calibrated,
+                                                        analysis_gui_values,
+                                                        sequence_gui_values,
+                                                        particle_gui_values)
+                self.current_sequence = self.stch_analysis.get_replicate_by_index(0)
+                self.current_particle = None
+                self.update_project_files()
+
+                self.update_status_bar('Data folder succefully loaded! Starting analysis ...')
+                self.iterate()
+                self.update_brightness_tab()
+                int_data = self.analyzeResults(calibrated)
+                stoichiometry = []
+                n_particle = []
+                for t, dat in enumerate(int_data):
+                    stoichiometry.append(np.mean(np.array(dat))/self.stoich_calibration*32)
+                    n_particle.append(len(dat))
+                    for index, intensity in enumerate(dat):
+                        self.data[self.fieldnames[0]].append(rootdir.split("\\")[-1].replace(" ", ""))
+                        self.data[self.fieldnames[1]].append(int(pos))
+                        self.data[self.fieldnames[2]].append(int(t))
+                        self.data[self.fieldnames[3]].append(int(index))
+                        self.data[self.fieldnames[4]].append(float(intensity))
+                datas.append(int_data)
+                stoichiometries.append(stoichiometry)
+                n_particles.append(n_particle)
+                calibrated = True
+            else:
+                self.folder_path.SetValue('')
+                wx.MessageBox('No TIFF images in selected folder',
+                            'Info', wx.OK | wx.ICON_ERROR)
+                self.update_status_bar('')
         
         #we now have an array with a=[[1(t=1),1(t=2),...],[2(t=1),2(t=2),...],...] and we want [[1(t=1),2(t=1),...],[1(t=2),2[t=2],...],...] to be able to perform np.mean(i for i in a)
         s_reshaped = np.array(list(zip(*stoichiometries)))
@@ -1676,12 +1685,14 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
         npart_kinetics = np.array(list(zip(*[(np.mean(i),np.std(i)) for i in npart_reshaped])))
 
         data_reshaped = np.array(list(zip(*datas)))
-
+        print(s_kinetics)
         self.analyzed_data["time"] = np.arange(0, len(s_kinetics[0])*10, 10)
         self.analyzed_data["stoichiometry"] = s_kinetics[0]
         self.analyzed_data["stoichiometry_err"] = s_kinetics[1]
         self.analyzed_data["nparticles"] = npart_kinetics[0]
         self.analyzed_data["nparticles_err"] = npart_kinetics[1]
+        self.analyzed_data["stoich_x_npart"] = list(np.array(s_kinetics[0])*np.array(npart_kinetics[0]))
+        self.analyzed_data["stoich_x_npart_err"] = list(np.array(s_kinetics[0])*np.array(npart_kinetics[1])+np.array(s_kinetics[1])*np.array(npart_kinetics[0]))
 
         print(self.analyzed_data)
 
@@ -1707,7 +1718,10 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
         #first find maximum
         max_value = max(s_kinetics[0])
         #find index of maximum (if there are multiple take the first one)
-        max_index = int([index for index, item in enumerate(s_kinetics[0]) if item == max_value][0])
+        try:
+            max_index = int([index for index, item in enumerate(s_kinetics[0]) if item == max_value][0])
+        except IndexError:
+            max_index = 4
         print("maximum oligomerization after " + str(max_index*10) + " minutes")
         data_cumulative = []
         for i,p_int in enumerate(datas):
@@ -2612,7 +2626,7 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
         axis[1][1].set_ylim(0,200)
 
         axis[0][0].hist(np.array(self.data['intensity'], dtype = np.float)/self.calibrations[0]*32)
-
+        print(self.data['time'])
         n_times = int(max(self.data['time']))
         stoichiometry = np.zeros(n_times+1)
         print(n_times)
@@ -2636,7 +2650,7 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
             stoichiometry = np.array(list(zip(*[(np.mean(i),np.std(i)) for i in intensity_times])))/self.calibrations[0]*32
             intensity_experiments.append(intensity_times)
             axis[0][1].plot(np.arange(0, len(stoichiometry[0])*10, 10), stoichiometry[0])
-            axis[0][1].fill_between(np.arange(0, len(stoichiometry[0])*10, 10), stoichiometry[0] - stoichiometry[1], stoichiometry[0] + stoichiometry[1], alpha=0.2)
+            #axis[0][1].fill_between(np.arange(0, len(stoichiometry[0])*10, 10), stoichiometry[0] - stoichiometry[1], stoichiometry[0] + stoichiometry[1], alpha=0.2)
 
         #plot stoichiometry of different experiments
         for e,experiment in enumerate(intensity_experiments):

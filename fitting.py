@@ -3,22 +3,26 @@ import numpy as np
 
 class BGMatrixQuadrant:
     def __init__(self, r1, r2, c1, c2):
-        self.r1 = r1
-        self.r2 = r2
-        self.c1 = c1
-        self.c2 = c2
+        self.r1 = int(r1)
+        self.r2 = int(r2)
+        self.c1 = int(c1)
+        self.c2 = int(c2)
 
     def __str__(self):
         return "{0} {1} {2} {3}".format(self.r1, self.r2, self.c1, self.c2)
 
     def sum(self, matrix):
-        return matrix[self.r1:self.r2, self.c1:self.c2].sum()
+        print(self.r1)
+        print(self.r2)
+        print(matrix)
+        print(matrix[0,0])
+        return matrix[int(self.r1):int(self.r2), int(self.c1):int(self.c2)].sum()
 
     def count(self, matrix):
-        return float(matrix[self.r1:self.r2, self.c1:self.c2].size)
+        return float(matrix[int(self.r1):int(self.r2), int(self.c1):int(self.c2)].size)
 
     def values(self, matrix):
-        return matrix[self.r1:self.r2, self.c1:self.c2].flatten()
+        return matrix[int(self.r1):int(self.r2), int(self.c1):int(self.c2)].flatten()
 
     def average(self, matrix):
         return self.sum(matrix) / self.count(matrix)

@@ -412,12 +412,12 @@ class StchSequence:
         if self.video is None:
             self.load_video()
         image = np.copy(self.video[frame])
-        bgmatrix = BGMatrix(image, width)
+        bgmatrix = fitting.BGMatrix(image, width)
         self.bckg_rois = bgmatrix.get_min_squares()
         self.update_global_background(frame)
 
     def add_bckg_roi_from_coords(self, r1, r2, c1, c2):
-        self.bckg_rois.append(BGMatrixQuadrant(r1, r2, c1, c2))
+        self.bckg_rois.append(fitting.BGMatrixQuadrant(r1, r2, c1, c2))
 
     def add_bckg_roi_from_width(self, x, y, w):
         if self.is_close_to_edge(x+w/2, y+w/2, w/2):
@@ -664,12 +664,12 @@ class Particle:
         return dist < limit
 
 
-def get_images_from_lif(file, time, series):
+def get_images_from_lif(file, time, series, col=1):
     img_0 = file.get_image(series)
     images = []
     nz = 0
     print(time)
-    for i in img_0.get_iter_z(t=time, c=1):
+    for i in img_0.get_iter_z(t=time, c=col):
         nz += 1
         images.append(np.array(i))
     return images, nz
@@ -701,7 +701,7 @@ def process_folder(path, checked):
         outpath = path
         if img_file.endswith('lif'):
             file = LifFile(path + img_file)
-            ns = 0
+
             if checked:
                 try:
                     os.mkdir(path + img_file[0:len(img_file)-4])
@@ -709,8 +709,20 @@ def process_folder(path, checked):
                     print("directory already exists")
                 outpath += img_file[0:len(img_file)-4]
                 outpath += "\\"
-            for i,s in enumerate(file.get_iter_image()):    #go through series
-                    for t,_ in enumerate(s.get_iter_t(c=1, z=0)):   #go through time slices
-                        series, nz = get_images_from_lif(file,t,i)
-                        write_tif(max_int_proj(series), outpath + img_file[0:len(img_file)-4] + "-" + str(ns) + "-t=" + str(t) + '.tif', ns, nz+1)
-                    ns += 1
+                ns = 0
+                for i,s in enumerate(file.get_iter_image()):    #go through series
+                    try:
+                        for t,_ in enumerate(s.get_iter_t(c=1, z=0)):   #go through time slices
+                            series, nz = get_images_from_lif(file,t,i)
+                            write_tif(max_int_proj(series), outpath + img_file[0:len(img_file)-4] + "-" + str(ns) + "-t=" + str(t) + '.tif', ns, nz+1)
+                        ns += 1
+                    except ValueError:
+                        print("warning: file has only one color")
+                        try:
+                            for t,_ in enumerate(s.get_iter_t(c=0, z=0)):   #go through time slices
+                                series, nz = get_images_from_lif(file,t,i, col=0)
+                                write_tif(max_int_proj(series), outpath + img_file[0:len(img_file)-4] + "-" + str(ns) + "-t=" + str(t) + '.tif', ns, nz+1)
+                            ns += 1
+                        except ValueError:
+                            print("file corrupted and skipped")
+
