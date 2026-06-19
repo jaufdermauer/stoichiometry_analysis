@@ -322,7 +322,7 @@ class MainFrame(wx.Frame):
                     ('def_roi_radius', self.roi_radius, 6),
                     ('def_min_sigma', self.default_min_sigma, 2.0),
                     ('def_max_sigma', self.default_max_sigma, 3.0),
-                    ('def_threshold', self.default_threshold, 0.0001),
+                    ('def_threshold', self.default_threshold, 0.00002),
                     ('def_iterations', self.iterations, 8),
                     ('def_median_offset', self.default_offset, 3),
                     ('def_bins', self.default_bins, 10)]
@@ -2063,7 +2063,6 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
                     self.current_sequence.localize_particles(frame, fit_method)
                     self.show_check_box.SetValue(True)
                     self.update_image_tab()
-
                     #self.update_status_bar('Discarding particles ...')
                     # elf.current_sequence.discard_close_particles()
                     # self.show_check_box.SetValue(True)
@@ -2072,12 +2071,11 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
                     
                     self.update_status_bar('Discarding particles (Threshold)...')
                     threshold = float(self.width_threshold.GetValue())
-                    self.current_sequence.discard_wide_particles(threshold)
+                    self.current_sequence.discard_wide_particles(threshold) #error for no particles detected
                     self.discard_preview.SetValue(False)
                     self.show_check_box.SetValue(True)
                     self.update_image_tab()
                     self.update_status_bar("Discarding is done")
-
                     self.update_status_bar('Discarding particles (Stack)...')
                     # Gathering the values for all particles
                     to_remove = []
@@ -2578,7 +2576,7 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
         dlg = wx.FileDialog(self, "Select a file: ", style=wx.FD_SAVE)
         if dlg.ShowModal() == wx.ID_OK:
             #export raw data
-            file = dlg.GetPath()
+            file = dlg.GetPath().split('.')[0] + '.csv'
             with open(file, 'w', newline='') as csvfile:
                 writer = csv.writer(csvfile, delimiter = ",")
                 options_keys = [*self.stch_analysis.gui_values.keys(), 'calibration']
@@ -2667,8 +2665,8 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
         fig, axis = plt.subplots(1,2)
         axis[0].set_ylabel("counts")
         axis[0].set_xlabel("brightness")
-        #get data from string to float
 
+        #get data from string to float
         str = self.stch_analysis.export_brightness_3()
         splitstr = str.split("\n")[3].split(",")[0:-2]
 
@@ -2684,14 +2682,17 @@ THE USE OR OTHER DEALINGS IN THE SOFTWARE."""
                 else:
                     single_data.append(float(splitstr[0]))
                     splitstr.pop(0)
-            if not replicate.summary['calibration']:
+            if not replicate.summary['calibration'] and len(single_data) > 0:
                 int_data.append(single_data)
+            elif not replicate.summary['calibration'] and len(single_data) == 0:
+                int_data.append([0])
         if not calibrated:
             self.stoich_calibration = np.average(np.array(int_calibration).flatten())
 
         stoichiometry = []
         n_particles = []
         for dat in int_data:
+            print(dat)
             stoichiometry.append(np.average(np.array(dat))/self.stoich_calibration*32)
             n_particles.append(len(dat))
             axis[0].hist(np.array(dat)/self.stoich_calibration*32, alpha = 0.6)
